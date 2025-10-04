@@ -96,7 +96,6 @@ func (s *UserService) UpdateUserProfile(userToUpdate *user.User) error {
 		userToUpdate.Password = existing.Password
 	}
 
-	// Keep Role unchanged
 	userToUpdate.Role = existing.Role
 
 	if err := s.repository.Update(uow, userToUpdate); err != nil {
