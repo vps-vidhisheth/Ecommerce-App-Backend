@@ -21,13 +21,7 @@ type PaymentController struct {
 	cartService  *cartService.CartService
 }
 
-// Initialize controller with both services
-func NewPaymentController(
-	paymentService *paymentService.PaymentService,
-	orderService *orderService.OrderService,
-	cartService *cartService.CartService,
-	logger log.Log,
-) *PaymentController {
+func NewPaymentController(paymentService *paymentService.PaymentService, orderService *orderService.OrderService, cartService *cartService.CartService, logger log.Log) *PaymentController {
 	return &PaymentController{
 		log:          logger,
 		service:      paymentService,
@@ -57,14 +51,12 @@ func (c *PaymentController) CreatePayment(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Get logged-in user ID
 	userID, httpErr := authmiddleware.GetUserIDFromContext(r.Context())
 	if httpErr != nil {
 		web.RespondError(w, httpErr)
 		return
 	}
 
-	// Create order first
 	newOrder := orderModel.Order{
 		UserID: userID,
 		CartID: newPayment.CartID,
@@ -82,17 +74,14 @@ func (c *PaymentController) CreatePayment(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Get total amount from cart
 	totalAmount, err := c.cartService.GetTotalAmountByCartID(newPayment.CartID)
 	if err != nil {
 		c.log.Print("Failed to calculate cart total: ", err)
 		web.RespondError(w, err)
 		return
 	}
-
-	// Now link payment to the created order
 	newPayment.UserID = userID
-	newPayment.OrderID = newOrder.ID // <-- set order ID
+	newPayment.OrderID = newOrder.ID
 	newPayment.Amount = totalAmount
 
 	if err := newPayment.Validate(false); err != nil {
@@ -106,7 +95,6 @@ func (c *PaymentController) CreatePayment(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Respond with both payment and order info
 	web.RespondJSON(w, http.StatusCreated, map[string]interface{}{
 		"payment": newPayment,
 		"order":   newOrder,
@@ -121,6 +109,5 @@ func (c *PaymentController) GetAllPayments(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// This will include UserID
 	web.RespondJSON(w, http.StatusOK, allPayments)
 }

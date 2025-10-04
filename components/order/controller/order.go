@@ -47,9 +47,8 @@ func (c *OrderController) CreateOrder(w http.ResponseWriter, r *http.Request) {
 		web.RespondError(w, err)
 		return
 	}
-
-	if newOrder.UserID == uuid.Nil {
-		web.RespondError(w, errors.NewValidationError("User ID must be specified"))
+	if err := newOrder.Validate(false); err != nil {
+		web.RespondError(w, err)
 		return
 	}
 

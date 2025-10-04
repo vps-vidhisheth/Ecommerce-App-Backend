@@ -25,8 +25,7 @@ func (config *ModuleConfig) TableMigration(wg *sync.WaitGroup) {
 
 	var models []interface{} = []interface{}{
 		&Products{},
-		&ProductImage{}, // Product table
-
+		&ProductImage{},
 	}
 
 	for _, model := range models {

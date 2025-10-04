@@ -39,6 +39,11 @@ func (s *LoginService) ConfirmUserCredentials(userCreds *credentials.Credentials
 		return tempUser, "", err
 	}
 
+	// ======= NEW: Check if user is active =======
+	if !tempUser.IsActive {
+		return tempUser, "", fmt.Errorf("account is inactive, please contact admin")
+	}
+
 	attempt, exists := s.loginAttempts[tempUser.Email]
 	if !exists {
 		attempt = &login.LoginAttempt{UserID: tempUser.ID}

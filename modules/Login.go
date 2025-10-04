@@ -11,7 +11,5 @@ func registerLoginRoutes(appObj *app.App, repository repository.EcommerceReposit
 
 	CustomerService := service.NewLoginService(appObj.DB, repository)
 	CustomerController := controller.NewLoginController(CustomerService, appObj.Log)
-	appObj.ResigterControllerRoutes([]app.Controller{
-		CustomerController,
-	})
+	appObj.ResigterControllerRoutes([]app.Controller{CustomerController})
 }

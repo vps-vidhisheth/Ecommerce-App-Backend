@@ -27,12 +27,19 @@ func NewCartService(db *gorm.DB, repo repository.EcommerceRepository, associatio
 }
 
 func (s *CartService) calculateTotalAmount(c *cart.Cart) error {
+	uow := repository.NewUnitOfWork(s.db, true)
+	defer uow.RollBack()
+
 	total := 0.0
 	for i := range c.Products {
 		cp := &c.Products[i]
 
 		var product products.Products
-		if err := s.db.First(&product, "id = ?", cp.ProductID).Error; err != nil {
+		err := s.repository.GetRecord(uow, &product,
+			repository.Filter("id = ?", cp.ProductID),
+			repository.NotDeleted(),
+		)
+		if err != nil {
 			return err
 		}
 
@@ -44,6 +51,7 @@ func (s *CartService) calculateTotalAmount(c *cart.Cart) error {
 	}
 
 	c.TotalAmount = total
+	uow.Commit()
 	return nil
 }
 
@@ -109,7 +117,6 @@ func (s *CartService) UpdateCartProductQuantity(cartID, userID uuid.UUID, produc
 	uow := repository.NewUnitOfWork(s.db, false)
 	defer uow.RollBack()
 
-	// ✅ Fetch cart with products
 	var existingCart cart.Cart
 	err := s.repository.GetRecord(uow, &existingCart,
 		repository.Filter("id = ? AND user_id = ?", cartID, userID),
@@ -120,7 +127,6 @@ func (s *CartService) UpdateCartProductQuantity(cartID, userID uuid.UUID, produc
 		return nil, errors.NewValidationError("cart not found")
 	}
 
-	// ✅ Find product in cart
 	var cpToUpdate *cart.CartProduct
 	for i := range existingCart.Products {
 		if existingCart.Products[i].ProductID == productID {
@@ -132,7 +138,6 @@ func (s *CartService) UpdateCartProductQuantity(cartID, userID uuid.UUID, produc
 		return nil, errors.NewValidationError("product not found in cart")
 	}
 
-	// ✅ Update only quantity
 	cpToUpdate.Quantity = newQty
 	cpToUpdate.UpdatedAt = time.Now()
 
@@ -146,12 +151,9 @@ func (s *CartService) UpdateCartProductQuantity(cartID, userID uuid.UUID, produc
 		return nil, err
 	}
 
-	// ✅ Recalculate totals
 	if err := s.calculateTotalAmount(&existingCart); err != nil {
 		return nil, err
 	}
-
-	// ✅ Update cart totals only (not products)
 	existingCart.UpdatedAt = time.Now()
 	err = s.repository.UpdateWithMap(uow, &cart.Cart{}, map[string]interface{}{
 		"total_amount": existingCart.TotalAmount,
@@ -173,10 +175,7 @@ func (s *CartService) GetCartByUserID(userID uuid.UUID) ([]cart.Cart, error) {
 
 	var carts []cart.Cart
 	err := s.repository.GetAll(uow, &carts,
-		repository.Filter("user_id = ?", userID),
-		repository.NotDeleted(),
-		repository.Preload("Products"),
-	)
+		repository.Filter("user_id = ?", userID), repository.NotDeleted(), repository.Preload("Products"))
 	if err != nil {
 		return nil, err
 	}

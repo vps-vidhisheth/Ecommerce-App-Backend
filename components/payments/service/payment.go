@@ -34,8 +34,6 @@ func (s *PaymentService) CreatePayment(newPayment *payment.Payment) error {
 func (s *PaymentService) GetAllPayments(allPayments *[]payment.Payment) error {
 	uow := repository.NewUnitOfWork(s.db, true)
 	defer uow.RollBack()
-
-	// Just get all payments; UserID is already a column
 	err := s.repository.GetAll(uow, allPayments,
 		repository.NotDeleted(),
 	)

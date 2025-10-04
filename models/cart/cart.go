@@ -21,7 +21,7 @@ type CartProduct struct {
 type Cart struct {
 	baseStruct.Base
 	UserID      uuid.UUID     `gorm:"type:char(36);not null" json:"user_id"`
-	Products    []CartProduct `gorm:"foreignKey:CartID" json:"products"` // Each product has quantity
+	Products    []CartProduct `gorm:"foreignKey:CartID" json:"products"`
 	TotalAmount float64       `gorm:"type:decimal(10,2);default:0" json:"total_amount"`
 }
 
