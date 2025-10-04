@@ -239,3 +239,9 @@ func FilterWithOperator(columnNames []string, conditions []string, operators []s
 		return db, nil
 	}
 }
+
+func NotDeleted() QueryProcessor {
+	return func(db *gorm.DB, out interface{}) (*gorm.DB, error) {
+		return db.Where("deleted_at IS NULL"), nil
+	}
+}

@@ -18,36 +18,40 @@ type CartController struct {
 	service *service.CartService
 }
 
-func NewCartController(CartService *service.CartService, logger log.Log) *CartController {
+func NewCartController(cartService *service.CartService, logger log.Log) *CartController {
 	return &CartController{
 		log:     logger,
-		service: CartService,
+		service: cartService,
 	}
 }
 
-func (controller *CartController) RegisterRoutes(router *mux.Router) {
+func (c *CartController) RegisterRoutes(router *mux.Router) {
 	cartRouter := router.PathPrefix("/carts").Subrouter()
+	cartRouter.Use(authmiddleware.AuthMiddleware)
 
-	cartRouter.Handle("", authmiddleware.AuthMiddleware(http.HandlerFunc(controller.GetAllCarts))).Methods(http.MethodGet)
-	cartRouter.Handle("/{id}", authmiddleware.AuthMiddleware(http.HandlerFunc(controller.GetCartByID))).Methods(http.MethodGet)
-	cartRouter.Handle("/user/{user_id}", authmiddleware.AuthMiddleware(http.HandlerFunc(controller.GetCartByUserID))).Methods(http.MethodGet)
-	cartRouter.Handle("/user/{user_id}/total", authmiddleware.AuthMiddleware(http.HandlerFunc(controller.GetTotalAmountByUserID))).Methods(http.MethodGet)
-
-	adminRouter := router.PathPrefix("/carts").Subrouter()
-	adminRouter.Handle("", authmiddleware.AuthMiddleware(authmiddleware.AdminMiddleware(http.HandlerFunc(controller.CreateCart)))).Methods(http.MethodPost)
-	adminRouter.Handle("/{id}", authmiddleware.AuthMiddleware(authmiddleware.AdminMiddleware(http.HandlerFunc(controller.UpdateCart)))).Methods(http.MethodPut)
-	adminRouter.Handle("/{id}", authmiddleware.AuthMiddleware(authmiddleware.AdminMiddleware(http.HandlerFunc(controller.DeleteCart)))).Methods(http.MethodDelete)
-
-	controller.log.Print("======== Cart Routes Registered =========")
+	cartRouter.Handle("/{id}", http.HandlerFunc(c.GetCartByID)).Methods(http.MethodGet)
+	cartRouter.Handle("/user/{user_id}", http.HandlerFunc(c.GetCartByUserID)).Methods(http.MethodGet)
+	cartRouter.Handle("/user/{user_id}/total", http.HandlerFunc(c.GetTotalAmountByUserID)).Methods(http.MethodGet)
+	cartRouter.Handle("", http.HandlerFunc(c.CreateCart)).Methods(http.MethodPost)
+	cartRouter.Handle("/{id}/products/{product_id}", http.HandlerFunc(c.DeleteProductFromCart)).Methods(http.MethodDelete)
+	cartRouter.Handle("/{cartID}/products/{productID}/quantity", http.HandlerFunc(c.UpdateCartProductQuantity)).Methods(http.MethodPut)
+	c.log.Print("======== Cart Routes Registered =========")
 }
 
 func (c *CartController) CreateCart(w http.ResponseWriter, r *http.Request) {
 	var newCart cart.Cart
 	if err := web.UnmarshalJSON(r, &newCart); err != nil {
 		c.log.Print(err)
-		web.RespondError(w, err)
+		web.RespondError(w, errors.NewHTTPError(err.Error(), http.StatusBadRequest))
 		return
 	}
+
+	userID, httpErr := authmiddleware.GetUserIDFromContext(r.Context())
+	if httpErr != nil {
+		web.RespondError(w, httpErr)
+		return
+	}
+	newCart.UserID = userID
 
 	if err := newCart.Validate(false); err != nil {
 		c.log.Print(err.Error())
@@ -55,37 +59,65 @@ func (c *CartController) CreateCart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := c.service.CreateCart(&newCart); err != nil {
+	createdCart, err := c.service.CreateCart(&newCart)
+	if err != nil {
 		c.log.Print(err.Error())
 		web.RespondError(w, err)
 		return
 	}
 
-	web.RespondJSON(w, http.StatusCreated, newCart)
+	web.RespondJSON(w, http.StatusCreated, createdCart)
 }
 
-func (c *CartController) GetAllCarts(w http.ResponseWriter, r *http.Request) {
-	allCarts := []cart.DTO{}
-	var totalCount int
-	parser := web.NewParser(r)
-	limit, offset := parser.ParseLimitAndOffset()
+func (c *CartController) UpdateCartProductQuantity(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
 
-	if err := c.service.GetAllCarts(&allCarts, limit, offset, &totalCount, parser.Form); err != nil {
+	cartID, err := uuid.Parse(vars["cartID"])
+	if err != nil {
+		web.RespondError(w, errors.NewHTTPError("invalid cart id", http.StatusBadRequest))
+		return
+	}
+
+	productID, err := uuid.Parse(vars["productID"])
+	if err != nil {
+		web.RespondError(w, errors.NewHTTPError("invalid product id", http.StatusBadRequest))
+		return
+	}
+
+	userID, httpErr := authmiddleware.GetUserIDFromContext(r.Context())
+	if httpErr != nil {
+		web.RespondError(w, httpErr)
+		return
+	}
+
+	var req struct {
+		Quantity int `json:"quantity"`
+	}
+	if err := web.UnmarshalJSON(r, &req); err != nil {
+		c.log.Print(err)
+		web.RespondError(w, errors.NewHTTPError("invalid request body", http.StatusBadRequest))
+		return
+	}
+	if req.Quantity <= 0 {
+		web.RespondError(w, errors.NewHTTPError("quantity must be greater than 0", http.StatusBadRequest))
+		return
+	}
+	updatedCart, err := c.service.UpdateCartProductQuantity(cartID, userID, productID, req.Quantity)
+	if err != nil {
 		c.log.Print(err.Error())
 		web.RespondError(w, err)
 		return
 	}
 
-	web.RespondJSONWithXTotalCount(w, http.StatusOK, totalCount, allCarts)
+	web.RespondJSON(w, http.StatusOK, updatedCart)
 }
 
 func (c *CartController) GetCartByID(w http.ResponseWriter, r *http.Request) {
 	parser := web.NewParser(r)
 	idStr := parser.GetParameter("id")
-
 	cartID, err := uuid.Parse(idStr)
 	if err != nil {
-		web.RespondError(w, errors.NewValidationError("invalid Cart id"))
+		web.RespondError(w, errors.NewValidationError("invalid cart id"))
 		return
 	}
 
@@ -99,67 +131,10 @@ func (c *CartController) GetCartByID(w http.ResponseWriter, r *http.Request) {
 	web.RespondJSON(w, http.StatusOK, cartObj)
 }
 
-func (c *CartController) UpdateCart(w http.ResponseWriter, r *http.Request) {
-	cartToUpdate := cart.Cart{}
-
-	if err := web.UnmarshalJSON(r, &cartToUpdate); err != nil {
-		c.log.Print(err.Error())
-		web.RespondError(w, errors.NewHTTPError(err.Error(), http.StatusBadRequest))
-		return
-	}
-
-	if err := cartToUpdate.Validate(true); err != nil {
-		c.log.Print(err.Error())
-		web.RespondError(w, errors.NewHTTPError(err.Error(), http.StatusBadRequest))
-		return
-	}
-
-	parser := web.NewParser(r)
-	idStr := parser.GetParameter("id")
-	id, err := uuid.Parse(idStr)
-	if err != nil {
-		web.RespondError(w, errors.NewValidationError("invalid cart id"))
-		return
-	}
-	cartToUpdate.ID = id
-
-	if err := c.service.UpdateCart(&cartToUpdate); err != nil {
-		c.log.Print(err.Error())
-		web.RespondError(w, err)
-		return
-	}
-
-	web.RespondJSON(w, http.StatusOK, cartToUpdate)
-}
-
-func (c *CartController) DeleteCart(w http.ResponseWriter, r *http.Request) {
-	cartToDelete := cart.Cart{}
-	parser := web.NewParser(r)
-	idStr := parser.GetParameter("id")
-
-	id, err := uuid.Parse(idStr)
-	if err != nil {
-		web.RespondError(w, errors.NewValidationError("invalid cart id"))
-		return
-	}
-
-	cartToDelete.ID = id
-
-	if err := c.service.DeleteCart(&cartToDelete); err != nil {
-		c.log.Print(err.Error())
-		web.RespondError(w, err)
-		return
-	}
-
-	web.RespondJSON(w, http.StatusOK, "Cart Deleted Successfully")
-}
-
 func (c *CartController) GetCartByUserID(w http.ResponseWriter, r *http.Request) {
-	parser := web.NewParser(r)
-	userIDStr := parser.GetParameter("user_id")
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
-		web.RespondError(w, errors.NewValidationError("invalid User id"))
+	userID, httpErr := authmiddleware.GetUserIDFromContext(r.Context())
+	if httpErr != nil {
+		web.RespondError(w, httpErr)
 		return
 	}
 
@@ -178,11 +153,11 @@ func (c *CartController) GetTotalAmountByUserID(w http.ResponseWriter, r *http.R
 	userIDStr := parser.GetParameter("user_id")
 	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
-		web.RespondError(w, errors.NewValidationError("invalid User id"))
+		web.RespondError(w, errors.NewValidationError("invalid user id"))
 		return
 	}
 
-	total, err := c.service.GetTotalAmountByUserID(userID)
+	total, err := c.service.GetTotalAmountByCartID(userID)
 	if err != nil {
 		c.log.Print(err.Error())
 		web.RespondError(w, err)
@@ -190,4 +165,37 @@ func (c *CartController) GetTotalAmountByUserID(w http.ResponseWriter, r *http.R
 	}
 
 	web.RespondJSON(w, http.StatusOK, map[string]float64{"total_amount": total})
+}
+
+func (c *CartController) DeleteProductFromCart(w http.ResponseWriter, r *http.Request) {
+	parser := web.NewParser(r)
+	cartIDStr := parser.GetParameter("id")
+	productIDStr := parser.GetParameter("product_id")
+
+	cartID, err := uuid.Parse(cartIDStr)
+	if err != nil {
+		web.RespondError(w, errors.NewValidationError("invalid cart id"))
+		return
+	}
+
+	productID, err := uuid.Parse(productIDStr)
+	if err != nil {
+		web.RespondError(w, errors.NewValidationError("invalid product id"))
+		return
+	}
+
+	userID, httpErr := authmiddleware.GetUserIDFromContext(r.Context())
+	if httpErr != nil {
+		web.RespondError(w, httpErr)
+		return
+	}
+
+	updatedCart, err := c.service.DeleteProductFromCart(cartID, userID, productID)
+	if err != nil {
+		c.log.Print(err.Error())
+		web.RespondError(w, err)
+		return
+	}
+
+	web.RespondJSON(w, http.StatusOK, updatedCart)
 }

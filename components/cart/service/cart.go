@@ -1,13 +1,12 @@
 package service
 
 import (
+	"time"
+
 	"ecommerce/errors"
 	"ecommerce/models/cart"
 	"ecommerce/models/products"
 	"ecommerce/repository"
-	"ecommerce/util"
-	"net/url"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jinzhu/gorm"
@@ -27,88 +26,232 @@ func NewCartService(db *gorm.DB, repo repository.EcommerceRepository, associatio
 	}
 }
 
-func (s *CartService) calculateTotalAmount(cartItem *cart.Cart) error {
-	var prod products.Products
-	if err := s.db.First(&prod, "id = ?", cartItem.ProductID).Error; err != nil {
-		return errors.NewValidationError("Invalid product ID")
+func (s *CartService) calculateTotalAmount(c *cart.Cart) error {
+	total := 0.0
+	for i := range c.Products {
+		cp := &c.Products[i]
+
+		var product products.Products
+		if err := s.db.First(&product, "id = ?", cp.ProductID).Error; err != nil {
+			return err
+		}
+
+		if cp.Quantity <= 0 {
+			cp.Quantity = 1
+		}
+
+		total += product.Price * float64(cp.Quantity)
 	}
-	cartItem.TotalAmount = float64(cartItem.Quantity) * prod.Price
+
+	c.TotalAmount = total
 	return nil
 }
 
-func (s *CartService) CreateCart(newCart *cart.Cart) error {
-	if err := s.calculateTotalAmount(newCart); err != nil {
-		return err
-	}
-
+func (s *CartService) CreateCart(newCart *cart.Cart) (*cart.Cart, error) {
 	uow := repository.NewUnitOfWork(s.db, false)
 	defer uow.RollBack()
 
-	newCart.ID = uuid.New()
-	newCart.CreatedAt = time.Now()
-	newCart.UpdatedAt = time.Now()
+	for i := range newCart.Products {
+		var product products.Products
+		err := s.repository.GetRecord(uow, &product,
+			repository.Filter("id = ? AND deleted_at IS NULL AND is_active = ?", newCart.Products[i].ProductID, true))
+		if err != nil {
+			return nil, errors.NewValidationError("invalid or inactive product")
+		}
+	}
+
+	var existingCarts []cart.Cart
+	err := s.repository.GetAll(uow, &existingCarts,
+		repository.Filter("user_id = ?", newCart.UserID),
+		repository.NotDeleted(),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(existingCarts) > 0 {
+		existing := existingCarts[0]
+
+		for i := range newCart.Products {
+			newCart.Products[i].CartID = existing.ID
+			if err := s.repository.Add(uow, &newCart.Products[i]); err != nil {
+				return nil, err
+			}
+		}
+		if err := s.calculateTotalAmount(&existing); err != nil {
+			return nil, err
+		}
+
+		if err := s.repository.UpdateWithMap(uow, &existing, map[string]interface{}{
+			"total_amount": existing.TotalAmount,
+			"updated_at":   time.Now(),
+		}); err != nil {
+			return nil, err
+		}
+
+		uow.Commit()
+		return &existing, nil
+	}
+
+	if err := s.calculateTotalAmount(newCart); err != nil {
+		return nil, err
+	}
 
 	if err := s.repository.Add(uow, newCart); err != nil {
-		return err
+		return nil, err
 	}
 
 	uow.Commit()
-	return nil
+	return newCart, nil
 }
 
-func (s *CartService) UpdateCart(cartToUpdate *cart.Cart) error {
-	existing, err := s.doesCartExist(cartToUpdate.ID)
-	if err != nil {
-		return err
-	}
-
+func (s *CartService) UpdateCartProductQuantity(cartID, userID uuid.UUID, productID uuid.UUID, newQty int) (*cart.Cart, error) {
 	uow := repository.NewUnitOfWork(s.db, false)
 	defer uow.RollBack()
 
-	cartToUpdate.CreatedAt = existing.CreatedAt
-	cartToUpdate.UpdatedAt = time.Now()
-
-	if err := s.calculateTotalAmount(cartToUpdate); err != nil {
-		return err
+	// ✅ Fetch cart with products
+	var existingCart cart.Cart
+	err := s.repository.GetRecord(uow, &existingCart,
+		repository.Filter("id = ? AND user_id = ?", cartID, userID),
+		repository.Preload("Products"),
+		repository.NotDeleted(),
+	)
+	if err != nil {
+		return nil, errors.NewValidationError("cart not found")
 	}
 
-	if err := s.repository.Update(uow, cartToUpdate); err != nil {
-		return err
+	// ✅ Find product in cart
+	var cpToUpdate *cart.CartProduct
+	for i := range existingCart.Products {
+		if existingCart.Products[i].ProductID == productID {
+			cpToUpdate = &existingCart.Products[i]
+			break
+		}
+	}
+	if cpToUpdate == nil {
+		return nil, errors.NewValidationError("product not found in cart")
+	}
+
+	// ✅ Update only quantity
+	cpToUpdate.Quantity = newQty
+	cpToUpdate.UpdatedAt = time.Now()
+
+	err = s.repository.UpdateWithMap(uow, &cart.CartProduct{}, map[string]interface{}{
+		"quantity":   newQty,
+		"updated_at": cpToUpdate.UpdatedAt,
+	},
+		repository.Filter("cart_id = ? AND product_id = ?", cartID, productID),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// ✅ Recalculate totals
+	if err := s.calculateTotalAmount(&existingCart); err != nil {
+		return nil, err
+	}
+
+	// ✅ Update cart totals only (not products)
+	existingCart.UpdatedAt = time.Now()
+	err = s.repository.UpdateWithMap(uow, &cart.Cart{}, map[string]interface{}{
+		"total_amount": existingCart.TotalAmount,
+		"updated_at":   existingCart.UpdatedAt,
+	},
+		repository.Filter("id = ?", existingCart.ID),
+	)
+	if err != nil {
+		return nil, err
 	}
 
 	uow.Commit()
-	return nil
+	return &existingCart, nil
 }
 
-func (s *CartService) doesCartExist(ID uuid.UUID) (*cart.Cart, error) {
+func (s *CartService) GetCartByUserID(userID uuid.UUID) ([]cart.Cart, error) {
 	uow := repository.NewUnitOfWork(s.db, true)
 	defer uow.RollBack()
 
-	var c cart.Cart
-	if err := s.repository.GetRecord(uow, &c, repository.Filter("id = ?", ID)); err != nil {
-		return nil, errors.NewValidationError("Cart ID is invalid")
-	}
-
-	return &c, nil
-}
-
-func (s *CartService) DeleteCart(cartToDelete *cart.Cart) error {
-	existing, err := s.doesCartExist(cartToDelete.ID)
+	var carts []cart.Cart
+	err := s.repository.GetAll(uow, &carts,
+		repository.Filter("user_id = ?", userID),
+		repository.NotDeleted(),
+		repository.Preload("Products"),
+	)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	uow := repository.NewUnitOfWork(s.db, false)
-	defer uow.RollBack()
-
-	now := time.Now()
-	updateMap := map[string]interface{}{"DeletedAt": now}
-	if err := s.repository.UpdateWithMap(uow, existing, updateMap, repository.Filter("id=?", cartToDelete.ID)); err != nil {
-		return err
+	for ci := range carts {
+		_ = s.calculateTotalAmount(&carts[ci])
 	}
 
 	uow.Commit()
-	return nil
+	return carts, nil
+}
+
+func (s *CartService) DeleteProductFromCart(cartID, userID, productID uuid.UUID) (*cart.Cart, error) {
+	uow := repository.NewUnitOfWork(s.db, false)
+	defer uow.RollBack()
+
+	var c cart.Cart
+	err := s.repository.GetRecord(uow, &c,
+		repository.Filter("id = ? AND user_id = ?", cartID, userID),
+		repository.Preload("Products"),
+		repository.NotDeleted(),
+	)
+	if err != nil {
+		return nil, errors.NewValidationError("cart not found or not owned by user")
+	}
+
+	productExists := false
+	remainingProducts := []cart.CartProduct{}
+	for _, p := range c.Products {
+		if p.ProductID == productID {
+			productExists = true
+			continue
+		}
+		remainingProducts = append(remainingProducts, p)
+	}
+	if !productExists {
+		return nil, errors.NewValidationError("product not found in cart")
+	}
+
+	err = s.repository.UpdateWithMap(uow, &cart.CartProduct{}, map[string]interface{}{
+		"deleted_at": time.Now(),
+	},
+		repository.Filter("cart_id = ? AND product_id = ?", cartID, productID),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	c.Products = remainingProducts
+
+	if err := s.calculateTotalAmount(&c); err != nil {
+		return nil, err
+	}
+
+	c.UpdatedAt = time.Now()
+	err = s.repository.UpdateWithMap(uow, &cart.Cart{}, map[string]interface{}{
+		"total_amount": c.TotalAmount,
+		"updated_at":   c.UpdatedAt,
+	},
+		repository.Filter("id = ?", c.ID),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	uow.Commit()
+	return &c, nil
+}
+
+func (s *CartService) GetTotalAmountByCartID(cartID uuid.UUID) (float64, error) {
+	cartObj, err := s.GetCartByID(cartID)
+	if err != nil {
+		return 0, err
+	}
+	return cartObj.TotalAmount, nil
 }
 
 func (s *CartService) GetCartByID(id uuid.UUID) (*cart.Cart, error) {
@@ -116,83 +259,12 @@ func (s *CartService) GetCartByID(id uuid.UUID) (*cart.Cart, error) {
 	defer uow.RollBack()
 
 	var c cart.Cart
-	if err := s.repository.GetRecord(uow, &c, repository.Filter("id = ?", id)); err != nil {
+	err := s.repository.GetRecord(uow, &c, repository.Filter("id = ?", id), repository.NotDeleted(), repository.Preload("Products"))
+	if err != nil {
 		return nil, err
 	}
 
+	_ = s.calculateTotalAmount(&c)
 	uow.Commit()
 	return &c, nil
-}
-
-func (s *CartService) GetAllCarts(allCarts *[]cart.DTO, limit, offset int, totalCount *int, requestForm url.Values) error {
-	uow := repository.NewUnitOfWork(s.db, true)
-	defer uow.RollBack()
-
-	var queryProcessors []repository.QueryProcessor
-
-	// searchQuery := s.buildSearchQuery(requestForm)
-	// if searchQuery != nil {
-	// 	queryProcessors = append(queryProcessors, searchQuery)
-	// }
-
-	queryProcessors = append(queryProcessors, func(db *gorm.DB, out interface{}) (*gorm.DB, error) {
-		return db.Where("deleted_at IS NULL"), nil
-	})
-	queryProcessors = append(queryProcessors, repository.Paginate(limit, offset, totalCount))
-
-	if err := s.repository.GetAll(uow, allCarts, queryProcessors...); err != nil {
-		return err
-	}
-
-	uow.Commit()
-	return nil
-}
-
-func (s *CartService) GetCartByUserID(userID uuid.UUID) ([]cart.Cart, error) {
-	var carts []cart.Cart
-	if err := s.db.Where("user_id = ? AND deleted_at IS NULL", userID).Find(&carts).Error; err != nil {
-		return nil, err
-	}
-
-	for i := range carts {
-		if err := s.calculateTotalAmount(&carts[i]); err != nil {
-			return nil, err
-		}
-	}
-
-	return carts, nil
-}
-
-func (s *CartService) GetTotalAmountByUserID(userID uuid.UUID) (float64, error) {
-	carts, err := s.GetCartByUserID(userID)
-	if err != nil {
-		return 0, err
-	}
-
-	var total float64
-	for _, c := range carts {
-		total += c.TotalAmount
-	}
-
-	return total, nil
-}
-
-func (s *CartService) buildSearchQuery(requestForm url.Values) repository.QueryProcessor {
-	if len(requestForm) == 0 {
-		return nil
-	}
-
-	var columnNames []string
-	var conditions []string
-	var operators []string
-	var values []interface{}
-
-	if searchTerm := requestForm.Get("search"); searchTerm != "" {
-		columns := []string{"`id`", "`user_id`", "`product_id`"}
-		for _, col := range columns {
-			util.AddToSlice(col, "LIKE ?", "OR", "%"+searchTerm+"%", &columnNames, &conditions, &operators, &values)
-		}
-	}
-
-	return repository.FilterWithOperator(columnNames, conditions, operators, values)
 }

@@ -7,14 +7,12 @@ import (
 	authmiddleware "ecommerce/security/authMiddleWare"
 	"ecommerce/util"
 	"ecommerce/web"
-	"encoding/json"
 	"io"
 	"net/http"
 	"strconv"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
-	"gorm.io/datatypes"
 )
 
 type ProductController struct {
@@ -30,7 +28,6 @@ func NewProductController(productservice *service.ProductService, logger log.Log
 }
 
 func (c *ProductController) RegisterRoutes(router *mux.Router) {
-
 	productRouter := router.PathPrefix("/products").Subrouter()
 
 	productRouter.Handle("", authmiddleware.AuthMiddleware(http.HandlerFunc(c.GetAllProducts))).Methods(http.MethodGet)
@@ -45,13 +42,12 @@ func (c *ProductController) RegisterRoutes(router *mux.Router) {
 }
 
 func (c *ProductController) CreateProduct(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseMultipartForm(50 << 20); err != nil { // 50MB
+	if err := r.ParseMultipartForm(50 << 20); err != nil {
 		web.RespondError(w, err)
 		return
 	}
 
 	price, _ := strconv.ParseFloat(r.FormValue("price"), 64)
-
 	newProduct := products.Products{
 		Name:        r.FormValue("name"),
 		Description: r.FormValue("description"),
@@ -65,7 +61,6 @@ func (c *ProductController) CreateProduct(w http.ResponseWriter, r *http.Request
 	}
 
 	files := r.MultipartForm.File["images"]
-	var imagesBytes [][]byte //[] - one binary blob , [][] - many binary blob
 	for _, fileHeader := range files {
 		file, err := fileHeader.Open()
 		if err != nil {
@@ -74,22 +69,15 @@ func (c *ProductController) CreateProduct(w http.ResponseWriter, r *http.Request
 		}
 		defer file.Close()
 
-		b, err := io.ReadAll(file)
+		data, err := io.ReadAll(file)
 		if err != nil {
 			web.RespondError(w, err)
 			return
 		}
 
-		imagesBytes = append(imagesBytes, b)
-	}
-
-	if len(imagesBytes) > 0 {
-		imgJSON, err := json.Marshal(imagesBytes)
-		if err != nil {
-			web.RespondError(w, err)
-			return
-		}
-		newProduct.Images = datatypes.JSON(imgJSON)
+		newProduct.Images = append(newProduct.Images, products.ProductImage{
+			Image: data,
+		})
 	}
 
 	if err := c.service.CreateProduct(&newProduct); err != nil {
@@ -106,20 +94,19 @@ func (c *ProductController) UpdateProduct(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	idStr := mux.Vars(r)["id"]
-	id, err := uuid.Parse(idStr)
+	id, err := uuid.Parse(mux.Vars(r)["id"])
 	if err != nil {
 		web.RespondError(w, err)
 		return
 	}
 
-	price, _ := strconv.ParseFloat(r.FormValue("price"), 64)
+	price, _ := strconv.ParseFloat(r.FormValue("price"), 64) //form value always returns a string
 	productToUpdate := products.Products{
-		ID:          id,
 		Name:        r.FormValue("name"),
 		Description: r.FormValue("description"),
 		Price:       price,
 	}
+	productToUpdate.ID = id
 
 	if err := productToUpdate.Validate(true); err != nil {
 		web.RespondError(w, err)
@@ -127,7 +114,6 @@ func (c *ProductController) UpdateProduct(w http.ResponseWriter, r *http.Request
 	}
 
 	files := r.MultipartForm.File["images"]
-	var imagesBytes [][]byte
 	for _, fileHeader := range files {
 		file, err := fileHeader.Open()
 		if err != nil {
@@ -136,22 +122,15 @@ func (c *ProductController) UpdateProduct(w http.ResponseWriter, r *http.Request
 		}
 		defer file.Close()
 
-		b, err := io.ReadAll(file)
+		data, err := io.ReadAll(file)
 		if err != nil {
 			web.RespondError(w, err)
 			return
 		}
 
-		imagesBytes = append(imagesBytes, b)
-	}
-
-	if len(imagesBytes) > 0 {
-		imgJSON, err := json.Marshal(imagesBytes)
-		if err != nil {
-			web.RespondError(w, err)
-			return
-		}
-		productToUpdate.Images = datatypes.JSON(imgJSON)
+		productToUpdate.Images = append(productToUpdate.Images, products.ProductImage{
+			Image: data,
+		})
 	}
 
 	if err := c.service.UpdateProduct(&productToUpdate); err != nil {
@@ -163,14 +142,14 @@ func (c *ProductController) UpdateProduct(w http.ResponseWriter, r *http.Request
 }
 
 func (c *ProductController) DeleteProduct(w http.ResponseWriter, r *http.Request) {
-	idstr := mux.Vars(r)["id"]
-	id, err := uuid.Parse(idstr) // parse decode uuid or returns an error if cannot be parsed
+	id, err := uuid.Parse(mux.Vars(r)["id"])
 	if err != nil {
 		web.RespondError(w, err)
 		return
 	}
 
-	p := products.Products{ID: id}
+	p := products.Products{}
+	p.ID = id
 	if err := c.service.DeleteProduct(&p); err != nil {
 		web.RespondError(w, err)
 		return
@@ -180,14 +159,13 @@ func (c *ProductController) DeleteProduct(w http.ResponseWriter, r *http.Request
 }
 
 func (c *ProductController) GetProductByID(w http.ResponseWriter, r *http.Request) {
-	idStr := mux.Vars(r)["id"]
-	id, err := uuid.Parse(idStr)
+	id, err := uuid.Parse(mux.Vars(r)["id"])
 	if err != nil {
 		web.RespondError(w, err)
 		return
 	}
 
-	p, err := c.service.GetProductByID(id)
+	p, err := c.service.GetProductByID(id.String())
 	if err != nil {
 		web.RespondError(w, err)
 		return
@@ -200,7 +178,6 @@ func (c *ProductController) GetAllProducts(w http.ResponseWriter, r *http.Reques
 	allProducts := []products.DTO{}
 	var totalCount int
 	requestForm := r.URL.Query()
-
 	limit, offset := web.NewParser(r).ParseLimitAndOffset()
 
 	if err := c.service.GetAllProducts(&allProducts, limit, offset, &totalCount, requestForm); err != nil {
@@ -212,7 +189,7 @@ func (c *ProductController) GetAllProducts(w http.ResponseWriter, r *http.Reques
 }
 
 func (c *ProductController) BulkCreateProducts(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseMultipartForm(50 << 20); err != nil { //50MB
+	if err := r.ParseMultipartForm(50 << 20); err != nil {
 		web.RespondError(w, err)
 		return
 	}
@@ -229,28 +206,10 @@ func (c *ProductController) BulkCreateProducts(w http.ResponseWriter, r *http.Re
 		web.RespondError(w, err)
 		return
 	}
+
 	excelPath := "./uploads/excel/" + excelFilename
 
-	imagesMap := make(map[string][]byte)
-	files := r.MultipartForm.File["images"]
-	for _, fh := range files {
-		f, err := fh.Open()
-		if err != nil {
-			web.RespondError(w, err)
-			return
-		}
-		defer f.Close()
-
-		data, err := io.ReadAll(f)
-		if err != nil {
-			web.RespondError(w, err)
-			return
-		}
-
-		imagesMap[fh.Filename] = data
-	}
-
-	if err := c.service.BulkCreateProducts(excelPath, imagesMap); err != nil {
+	if err := c.service.BulkCreateProducts(excelPath); err != nil {
 		web.RespondError(w, err)
 		return
 	}

@@ -3,6 +3,8 @@ package controller
 import (
 	"ecommerce/components/log"
 	"ecommerce/components/user/service"
+	"ecommerce/errors"
+	"ecommerce/models/baseStruct"
 	"ecommerce/models/user"
 	authmiddleware "ecommerce/security/authMiddleWare"
 	"ecommerce/web"
@@ -29,21 +31,23 @@ func (c *UserController) RegisterRoutes(router *mux.Router) {
 	userRouter := router.PathPrefix("/users").Subrouter()
 
 	userRouter.HandleFunc("/register", c.RegisterUser).Methods(http.MethodPost)
-	userRouter.Handle("/me", authmiddleware.AuthMiddleware(http.HandlerFunc(c.GetMyProfile))).Methods(http.MethodGet)
-
 	userRouter.HandleFunc("/request-password-reset", c.RequestPasswordReset).Methods(http.MethodPost)
 	userRouter.HandleFunc("/reset-password", c.ResetPasswordWithToken).Methods(http.MethodPost)
 
-	userRouter.Handle("/{id}", authmiddleware.AuthMiddleware(http.HandlerFunc(c.UpdateUser))).Methods(http.MethodPut)
+	authRouter := userRouter.NewRoute().Subrouter()
+	authRouter.Use(authmiddleware.AuthMiddleware)
+	authRouter.HandleFunc("/me", c.GetMyProfile).Methods(http.MethodGet)
+	authRouter.HandleFunc("/me", c.UpdateMyProfile).Methods(http.MethodPut)
+	authRouter.HandleFunc("/{id}", c.DeleteUser).Methods(http.MethodDelete)
 
-	adminRouter := router.PathPrefix("/users").Subrouter()
-	adminRouter.Handle("", authmiddleware.AuthMiddleware(authmiddleware.AdminMiddleware(http.HandlerFunc(c.GetAllUsers)))).Methods(http.MethodGet)
-	adminRouter.Handle("/{id}/status", authmiddleware.AuthMiddleware(authmiddleware.AdminMiddleware(http.HandlerFunc(c.UpdateUserStatus)))).Methods(http.MethodPut)
-	adminRouter.Handle("/{id}", authmiddleware.AuthMiddleware(authmiddleware.AdminMiddleware(http.HandlerFunc(c.DeleteUser)))).Methods(http.MethodDelete)
+	adminRouter := userRouter.NewRoute().Subrouter()
+	adminRouter.Use(authmiddleware.AuthMiddleware, authmiddleware.AdminMiddleware)
+	adminRouter.HandleFunc("", c.GetAllUsers).Methods(http.MethodGet)
+	adminRouter.HandleFunc("/{id}/status", c.UpdateUserStatus).Methods(http.MethodPut)
+	adminRouter.HandleFunc("/{id}", c.DeleteUser).Methods(http.MethodDelete)
 
 	c.log.Print("======== User Routes Registered =========")
 }
-
 func (c *UserController) RegisterUser(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
 		web.RespondError(w, err)
@@ -62,15 +66,14 @@ func (c *UserController) RegisterUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	file, _, err := r.FormFile("profile_pic")
-	if err == nil {
+	if file, _, err := r.FormFile("profile_pic"); err == nil {
 		defer file.Close()
-		fileBytes, err := io.ReadAll(file)
-		if err != nil {
+		if fileBytes, err := io.ReadAll(file); err == nil {
+			newUser.ProfilePic = fileBytes
+		} else {
 			web.RespondError(w, err)
 			return
 		}
-		newUser.ProfilePic = fileBytes
 	}
 
 	if err := c.service.CreateUser(&newUser); err != nil {
@@ -81,48 +84,44 @@ func (c *UserController) RegisterUser(w http.ResponseWriter, r *http.Request) {
 	web.RespondJSON(w, http.StatusCreated, newUser)
 }
 
-func (c *UserController) UpdateUser(w http.ResponseWriter, r *http.Request) {
+func (c *UserController) UpdateMyProfile(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
 		web.RespondError(w, err)
 		return
 	}
 
-	idStr := mux.Vars(r)["id"]
-	id, err := uuid.Parse(idStr)
-	if err != nil {
-		web.RespondError(w, err)
+	userID, httpErr := authmiddleware.GetUserIDFromContext(r.Context())
+	if httpErr != nil {
+		web.RespondError(w, httpErr)
 		return
 	}
 
 	userToUpdate := user.User{
-		ID:    id,
+		Base:  baseStruct.Base{ID: userID},
 		Name:  r.FormValue("name"),
 		Email: r.FormValue("email"),
-		Role:  r.FormValue("role"),
 	}
 
-	password := r.FormValue("password")
-	if password != "" {
+	if password := r.FormValue("password"); password != "" {
 		userToUpdate.Password = password
 	}
 
-	file, _, err := r.FormFile("profile_pic")
-	if err == nil {
+	if file, _, err := r.FormFile("profile_pic"); err == nil {
 		defer file.Close()
-		fileBytes, err := io.ReadAll(file)
-		if err != nil {
+		if fileBytes, err := io.ReadAll(file); err == nil {
+			userToUpdate.ProfilePic = fileBytes
+		} else {
 			web.RespondError(w, err)
 			return
 		}
-		userToUpdate.ProfilePic = fileBytes
 	}
 
-	if err := userToUpdate.Validate(true); err != nil {
-		web.RespondError(w, err)
+	if userToUpdate.Name == "" || userToUpdate.Email == "" {
+		web.RespondError(w, errors.NewValidationError("Name and Email are required"))
 		return
 	}
 
-	if err := c.service.UpdateUser(&userToUpdate); err != nil {
+	if err := c.service.UpdateUserProfile(&userToUpdate); err != nil {
 		web.RespondError(w, err)
 		return
 	}
@@ -147,20 +146,19 @@ func (c *UserController) GetMyProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c *UserController) DeleteUser(w http.ResponseWriter, r *http.Request) {
-	idStr := mux.Vars(r)["id"]
-	id, err := uuid.Parse(idStr)
+	id, err := uuid.Parse(mux.Vars(r)["id"])
 	if err != nil {
 		web.RespondError(w, err)
 		return
 	}
 
-	u := user.User{ID: id}
+	u := user.User{Base: baseStruct.Base{ID: id}}
 	if err := c.service.DeleteUser(&u); err != nil {
 		web.RespondError(w, err)
 		return
 	}
 
-	web.RespondJSON(w, http.StatusOK, "User deleted successfully")
+	web.RespondJSON(w, http.StatusOK, map[string]string{"message": "User deleted successfully"})
 }
 
 func (c *UserController) GetAllUsers(w http.ResponseWriter, r *http.Request) {
@@ -182,7 +180,6 @@ func (c *UserController) RequestPasswordReset(w http.ResponseWriter, r *http.Req
 	var req struct {
 		Email string `json:"email"`
 	}
-
 	if err := web.UnmarshalJSON(r, &req); err != nil {
 		web.RespondError(w, err)
 		return
@@ -212,20 +209,16 @@ func (c *UserController) ResetPasswordWithToken(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	err := c.service.ResetPasswordWithToken(req.Email, req.Token, req.NewPassword)
-	if err != nil {
+	if err := c.service.ResetPasswordWithToken(req.Email, req.Token, req.NewPassword); err != nil {
 		web.RespondError(w, err)
 		return
 	}
 
-	web.RespondJSON(w, http.StatusOK, map[string]string{
-		"message": "Password reset successfully",
-	})
+	web.RespondJSON(w, http.StatusOK, map[string]string{"message": "Password reset successfully"})
 }
 
 func (c *UserController) UpdateUserStatus(w http.ResponseWriter, r *http.Request) {
-	idStr := mux.Vars(r)["id"]
-	id, err := uuid.Parse(idStr)
+	id, err := uuid.Parse(mux.Vars(r)["id"])
 	if err != nil {
 		web.RespondError(w, err)
 		return
@@ -234,7 +227,6 @@ func (c *UserController) UpdateUserStatus(w http.ResponseWriter, r *http.Request
 	var req struct {
 		IsActive bool `json:"is_active"`
 	}
-
 	if err := web.UnmarshalJSON(r, &req); err != nil {
 		web.RespondError(w, err)
 		return

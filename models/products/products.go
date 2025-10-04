@@ -2,24 +2,34 @@ package products
 
 import (
 	"ecommerce/errors"
+	"ecommerce/models/baseStruct"
 	"ecommerce/util"
 	"time"
 
 	"github.com/google/uuid"
-	"gorm.io/datatypes"
-	"gorm.io/gorm"
+	"github.com/jinzhu/gorm"
 )
 
 type Products struct {
-	ID          uuid.UUID      `gorm:"type:char(36);primaryKey" json:"id"`
+	baseStruct.Base
 	Name        string         `gorm:"type:varchar(255);not null" json:"name"`
 	Description string         `gorm:"type:text" json:"description"`
-	Images      datatypes.JSON `gorm:"type:longblob" json:"images"` //`gorm:"type:json" json:"images"`
 	Price       float64        `gorm:"type:decimal(10,2);not null" json:"price"`
 	IsActive    bool           `gorm:"default:true" json:"is_active"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
-	DeletedAt   gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
+	Images      []ProductImage `gorm:"foreignKey:ProductID" json:"images"`
+}
+
+type ProductImage struct {
+	baseStruct.Base
+	ProductID uuid.UUID `gorm:"type:char(36);index" json:"product_id"`
+	Image     []byte    `gorm:"type:longblob" json:"image"`
+}
+
+func (p *ProductImage) BeforeCreate(scope *gorm.Scope) error {
+	if p.ID == uuid.Nil {
+		return scope.SetColumn("ID", uuid.New())
+	}
+	return nil
 }
 
 func (p *Products) Validate(isUpdate bool) error {
@@ -36,13 +46,13 @@ func (p *Products) Validate(isUpdate bool) error {
 }
 
 type DTO struct {
-	ID          uuid.UUID      `json:"id"`
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Images      datatypes.JSON `json:"images"`
-	Price       float64        `json:"price"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
+	ID          uuid.UUID `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Price       float64   `json:"price"`
+	Images      [][]byte  `json:"images"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 func (DTO) TableName() string {

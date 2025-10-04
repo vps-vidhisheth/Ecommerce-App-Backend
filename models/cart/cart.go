@@ -4,43 +4,41 @@ import (
 	"time"
 
 	"ecommerce/errors"
+	"ecommerce/models/baseStruct"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
+type CartProduct struct {
+	CartID    uuid.UUID  `gorm:"type:char(36);primaryKey;not null" json:"cart_id"`
+	ProductID uuid.UUID  `gorm:"type:char(36);primaryKey;not null" json:"product_id"`
+	Quantity  int        `gorm:"type:int;default:1" json:"quantity"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
+	DeletedAt *time.Time `gorm:"index" json:"deleted_at,omitempty"`
+}
+
 type Cart struct {
-	ID          uuid.UUID      `gorm:"type:char(36);primaryKey" json:"id"`
-	UserID      uuid.UUID      `gorm:"type:char(36);not null" json:"user_id"`
-	ProductID   uuid.UUID      `gorm:"type:char(36);not null" json:"product_id"`
-	Quantity    int            `gorm:"not null;default:1" json:"quantity"`
-	TotalAmount float64        `gorm:"type:decimal(10,2);default:0" json:"total_amount"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
-	DeletedAt   gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
+	baseStruct.Base
+	UserID      uuid.UUID     `gorm:"type:char(36);not null" json:"user_id"`
+	Products    []CartProduct `gorm:"foreignKey:CartID" json:"products"` // Each product has quantity
+	TotalAmount float64       `gorm:"type:decimal(10,2);default:0" json:"total_amount"`
 }
 
 func (c *Cart) Validate(isUpdate bool) error {
 	if c.UserID == uuid.Nil {
 		return errors.NewValidationError("Cart must have a valid user ID")
 	}
-	if c.ProductID == uuid.Nil {
-		return errors.NewValidationError("Cart must have a valid product ID")
-	}
-	if c.Quantity <= 0 {
-		c.Quantity = 1
-	}
 	return nil
 }
 
 type DTO struct {
-	ID          uuid.UUID `json:"id"`
-	UserID      uuid.UUID `json:"user_id"`
-	ProductID   uuid.UUID `json:"product_id"`
-	Quantity    int       `json:"quantity"`
-	TotalAmount float64   `json:"total_amount"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          uuid.UUID     `json:"id"`
+	UserID      uuid.UUID     `json:"user_id"`
+	Products    []CartProduct `json:"products"`
+	TotalAmount float64       `json:"total_amount"`
+	CreatedAt   time.Time     `json:"created_at"`
+	UpdatedAt   time.Time     `json:"updated_at"`
 }
 
 func (DTO) TableName() string {

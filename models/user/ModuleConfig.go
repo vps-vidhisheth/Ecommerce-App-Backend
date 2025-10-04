@@ -1,10 +1,11 @@
 package user
 
 import (
+	"ecommerce/components/log"
+	"ecommerce/models/baseStruct"
+	"ecommerce/repository"
 	"sync"
 	"time"
-
-	"ecommerce/components/log"
 
 	"github.com/google/uuid"
 	"github.com/jinzhu/gorm"
@@ -12,12 +13,14 @@ import (
 )
 
 type ModuleConfig struct {
-	DB *gorm.DB
+	DB         *gorm.DB
+	Repository repository.EcommerceRepository
 }
 
 func NewUserModuleConfig(db *gorm.DB) *ModuleConfig {
 	return &ModuleConfig{
-		DB: db,
+		DB:         db,
+		Repository: repository.NewGormRespository(),
 	}
 }
 
@@ -37,7 +40,6 @@ func (config *ModuleConfig) TableMigration(wg *sync.WaitGroup) {
 	}
 
 	log.GetLogger().Print("User Table Migrated Successfully")
-
 	config.seedAdmin()
 }
 
@@ -48,12 +50,17 @@ func (config *ModuleConfig) seedAdmin() {
 		return
 	}
 
-	var count int64
-	if err := db.Model(&User{}).Where("role = ?", "admin").Count(&count).Error; err != nil {
-		log.GetLogger().Print("Failed to count admins:", err)
+	if config.Repository == nil {
+		log.GetLogger().Print("Repository is nil, cannot seed admin")
 		return
 	}
-	if count > 0 {
+
+	uow := repository.NewUnitOfWork(db, true)
+	defer uow.RollBack()
+
+	var existingAdmin User
+	err := config.Repository.GetRecord(uow, &existingAdmin, repository.Filter("role = ?", "admin"))
+	if err == nil {
 		log.GetLogger().Print("Admin already exists, skipping seeding.")
 		return
 	}
@@ -65,14 +72,16 @@ func (config *ModuleConfig) seedAdmin() {
 	}
 
 	admin := User{
-		ID:        uuid.New(),
-		Name:      "Admin",
-		Email:     "admin@ecommerce.com",
-		Password:  string(pass),
-		Role:      "admin",
-		IsActive:  true,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		Base: baseStruct.Base{
+			ID:        uuid.New(),
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
+		Name:     "Admin",
+		Email:    "admin@ecommerce.com",
+		Password: string(pass),
+		Role:     "admin",
+		IsActive: true,
 	}
 
 	if err := db.Create(&admin).Error; err != nil {

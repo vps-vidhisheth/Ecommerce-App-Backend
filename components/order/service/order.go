@@ -5,8 +5,6 @@ import (
 	"ecommerce/models/cart"
 	"ecommerce/models/order"
 	"ecommerce/repository"
-	"ecommerce/util"
-	"net/url"
 	"time"
 
 	"github.com/google/uuid"
@@ -30,19 +28,23 @@ func NewOrderService(db *gorm.DB, repo repository.EcommerceRepository, associati
 }
 
 func (s *OrderService) CreateOrder(newOrder *order.Order) error {
+	uow := repository.NewUnitOfWork(s.db, false)
+	defer uow.RollBack()
+	if newOrder.Status == "" {
+		newOrder.Status = "confirmed"
+	}
+
 	var c cart.Cart
-	if err := s.db.Where("id = ? AND user_id = ? AND deleted_at IS NULL", newOrder.CartID, newOrder.UserID).First(&c).Error; err != nil {
-		return errors.NewValidationError("Invalid cart for this user")
+	if err := s.repository.GetRecord(
+		uow,
+		&c,
+		repository.Filter("id = ?", newOrder.CartID),
+		repository.NotDeleted(),
+	); err != nil {
+		return errors.NewValidationError("Cart not found for this order")
 	}
 
 	newOrder.TotalAmount = c.TotalAmount
-	newOrder.CreatedAt = time.Now()
-	newOrder.UpdatedAt = time.Now()
-
-	uow := repository.NewUnitOfWork(s.db, false)
-	defer uow.RollBack()
-
-	newOrder.ID = uuid.New()
 
 	if err := s.repository.Add(uow, newOrder); err != nil {
 		return err
@@ -51,34 +53,6 @@ func (s *OrderService) CreateOrder(newOrder *order.Order) error {
 	uow.Commit()
 	return nil
 }
-
-func (s *OrderService) UpdateOrder(orderToUpdate *order.Order) error {
-	existing, err := s.doesOrderExist(orderToUpdate.ID)
-	if err != nil {
-		return err
-	}
-
-	uow := repository.NewUnitOfWork(s.db, false)
-	defer uow.RollBack()
-
-	orderToUpdate.CreatedAt = existing.CreatedAt
-	orderToUpdate.UpdatedAt = time.Now()
-
-	var c cart.Cart
-	if err := s.db.Where("id = ? AND user_id = ? AND deleted_at IS NULL", orderToUpdate.CartID, orderToUpdate.UserID).First(&c).Error; err != nil {
-		return errors.NewValidationError("Invalid cart for this user")
-	}
-
-	orderToUpdate.TotalAmount = c.TotalAmount
-
-	if err := s.repository.Update(uow, orderToUpdate); err != nil {
-		return err
-	}
-
-	uow.Commit()
-	return nil
-}
-
 func (s *OrderService) DeleteOrder(orderToDelete *order.Order) error {
 	existing, err := s.doesOrderExist(orderToDelete.ID)
 	if err != nil {
@@ -92,9 +66,17 @@ func (s *OrderService) DeleteOrder(orderToDelete *order.Order) error {
 	uow := repository.NewUnitOfWork(s.db, false)
 	defer uow.RollBack()
 
-	now := time.Now()
-	updateMap := map[string]interface{}{"DeletedAt": now}
-	if err := s.repository.UpdateWithMap(uow, existing, updateMap, repository.Filter("id = ?", orderToDelete.ID)); err != nil {
+	updateMap := map[string]interface{}{
+		"status":     "canceled",
+		"updated_at": gorm.Expr("NOW()"),
+	}
+
+	if err := s.repository.UpdateWithMap(
+		uow,
+		existing,
+		updateMap,
+		repository.Filter("id = ?", orderToDelete.ID),
+	); err != nil {
 		return err
 	}
 
@@ -102,29 +84,32 @@ func (s *OrderService) DeleteOrder(orderToDelete *order.Order) error {
 	return nil
 }
 
-func (s *OrderService) GetOrderByID(id uuid.UUID) (*order.Order, error) {
+func (s *OrderService) GetOrdersByUserID(userID uuid.UUID) ([]order.Order, error) {
 	uow := repository.NewUnitOfWork(s.db, true)
 	defer uow.RollBack()
 
-	var o order.Order
-	if err := s.repository.GetRecord(uow, &o, repository.Filter("id = ?", id)); err != nil {
+	var orders []order.Order
+	if err := s.repository.GetAll(
+		uow,
+		&orders,
+		repository.Filter("user_id = ?", userID),
+		repository.NotDeleted(),
+	); err != nil {
 		return nil, err
 	}
 
 	uow.Commit()
-	return &o, nil
+	return orders, nil
 }
 
-func (s *OrderService) GetAllOrders(allOrders *[]order.Order, limit, offset int, totalCount *int, requestForm url.Values) error {
+func (s *OrderService) GetAllOrders(allOrders *[]order.Order, limit, offset int, totalCount *int) error {
 	uow := repository.NewUnitOfWork(s.db, true)
 	defer uow.RollBack()
 
-	var queryProcessors []repository.QueryProcessor
-
-	queryProcessors = append(queryProcessors, func(db *gorm.DB, out interface{}) (*gorm.DB, error) {
-		return db.Where("deleted_at IS NULL"), nil
-	})
-	queryProcessors = append(queryProcessors, repository.Paginate(limit, offset, totalCount))
+	queryProcessors := []repository.QueryProcessor{
+		repository.NotDeleted(),
+		repository.Paginate(limit, offset, totalCount),
+	}
 
 	if err := s.repository.GetAll(uow, allOrders, queryProcessors...); err != nil {
 		return err
@@ -135,56 +120,18 @@ func (s *OrderService) GetAllOrders(allOrders *[]order.Order, limit, offset int,
 }
 
 func (s *OrderService) doesOrderExist(ID uuid.UUID) (*order.Order, error) {
-	var o order.Order
 	uow := repository.NewUnitOfWork(s.db, true)
 	defer uow.RollBack()
 
-	err := s.repository.GetRecord(uow, &o, repository.Filter("id = ?", ID))
-	if err != nil {
+	var o order.Order
+	if err := s.repository.GetRecord(
+		uow,
+		&o,
+		repository.Filter("id = ?", ID),
+		repository.NotDeleted(),
+	); err != nil {
 		return nil, errors.NewValidationError("Order ID is invalid")
 	}
 
 	return &o, nil
-}
-
-func (s *OrderService) GetOrdersByUserID(userID uuid.UUID) ([]order.Order, error) {
-	var orders []order.Order
-	if err := s.db.Where("user_id = ? AND deleted_at IS NULL", userID).Find(&orders).Error; err != nil {
-		return nil, err
-	}
-	return orders, nil
-}
-
-func (s *OrderService) buildSearchQuery(requestForm url.Values) repository.QueryProcessor {
-	if len(requestForm) == 0 {
-		return nil
-	}
-
-	var columnNames []string
-	var conditions []string
-	var operators []string
-	var values []interface{}
-
-	if searchTerm := requestForm.Get("search"); searchTerm != "" {
-		columns := []string{"`id`", "`cart_id`", "`user_id`"}
-		for _, col := range columns {
-			util.AddToSlice(col, "LIKE ?", "OR", "%"+searchTerm+"%", &columnNames, &conditions, &operators, &values)
-		}
-	}
-
-	return repository.FilterWithOperator(columnNames, conditions, operators, values)
-}
-
-func (s *OrderService) GetTotalAmountByUserID(userID uuid.UUID) (float64, error) {
-	var orders []order.Order
-	if err := s.db.Where("user_id = ? AND deleted_at IS NULL", userID).Find(&orders).Error; err != nil {
-		return 0, err
-	}
-
-	var total float64
-	for _, o := range orders {
-		total += o.TotalAmount
-	}
-
-	return total, nil
 }

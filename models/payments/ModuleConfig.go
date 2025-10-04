@@ -1,4 +1,4 @@
-package products
+package payment
 
 import (
 	"sync"
@@ -12,7 +12,7 @@ type ModuleConfig struct {
 	DB *gorm.DB
 }
 
-func NewProductModuleConfig(db *gorm.DB) *ModuleConfig {
+func NewPaymentModuleConfig(db *gorm.DB) *ModuleConfig {
 	return &ModuleConfig{
 		DB: db,
 	}
@@ -22,11 +22,8 @@ func (config *ModuleConfig) TableMigration(wg *sync.WaitGroup) {
 	if wg != nil {
 		defer wg.Done()
 	}
-
-	var models []interface{} = []interface{}{
-		&Products{},
-		&ProductImage{}, // Product table
-
+	var models []interface{} = []interface{}{ //[]interface{} is like list of anything and here it is
+		&Payment{}, //pointer to payment struct rather than direct struct
 	}
 
 	for _, model := range models {
@@ -35,5 +32,5 @@ func (config *ModuleConfig) TableMigration(wg *sync.WaitGroup) {
 		}
 	}
 
-	log.GetLogger().Print("Products and ProductImages Tables Migrated Successfully")
+	log.GetLogger().Print("Products Table Migrated Successfully")
 }

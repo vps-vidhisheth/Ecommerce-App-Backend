@@ -5,7 +5,6 @@ import (
 	"ecommerce/components/login/service"
 	"ecommerce/errors"
 	"ecommerce/models/credentials"
-	"ecommerce/security/token"
 	"ecommerce/web"
 	"fmt"
 	"net/http"
@@ -33,28 +32,20 @@ func (c *LoginController) RegisterRoutes(router *mux.Router) {
 func (c *LoginController) UserLogin(w http.ResponseWriter, r *http.Request) {
 	var userCredentials credentials.Credentials
 
-	err := web.UnmarshalJSON(r, &userCredentials)
-	if err != nil {
+	if err := web.UnmarshalJSON(r, &userCredentials); err != nil {
 		c.log.Print(err)
 		web.RespondError(w, errors.NewHTTPError(err.Error(), http.StatusBadRequest))
 		return
 	}
 
-	targetUser, err := c.service.ConfirmUserCredentials(&userCredentials)
+	targetUser, authToken, err := c.service.ConfirmUserCredentials(&userCredentials)
 	if err != nil {
 		c.log.Print(err.Error())
-		if err.Error()[:12] == "account lock" {
+		if err.Error()[:12] == "account locked" {
 			web.RespondError(w, errors.NewHTTPError(err.Error(), http.StatusForbidden))
 		} else {
 			web.RespondError(w, errors.NewHTTPError("invalid email or password", http.StatusUnauthorized))
 		}
-		return
-	}
-
-	authToken, err := token.GenerateAuthToken(targetUser.ID, targetUser.Name, targetUser.Role)
-	if err != nil {
-		c.log.Print(err.Error())
-		web.RespondError(w, errors.NewHTTPError("failed to generate token", http.StatusInternalServerError))
 		return
 	}
 

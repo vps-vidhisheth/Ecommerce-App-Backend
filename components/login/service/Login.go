@@ -8,6 +8,7 @@ import (
 	"ecommerce/models/login"
 	"ecommerce/models/user"
 	"ecommerce/repository"
+	"ecommerce/security/token"
 
 	"github.com/jinzhu/gorm"
 	"golang.org/x/crypto/bcrypt"
@@ -27,7 +28,7 @@ func NewLoginService(db *gorm.DB, repo repository.EcommerceRepository) *LoginSer
 	}
 }
 
-func (s *LoginService) ConfirmUserCredentials(userCreds *credentials.Credentials) (user.User, error) {
+func (s *LoginService) ConfirmUserCredentials(userCreds *credentials.Credentials) (user.User, string, error) {
 	uow := repository.NewUnitOfWork(s.db, false)
 	defer uow.RollBack()
 
@@ -35,7 +36,7 @@ func (s *LoginService) ConfirmUserCredentials(userCreds *credentials.Credentials
 	err := s.repository.GetRecord(uow, &tempUser,
 		repository.Filter("`email` = ?", userCreds.Email))
 	if err != nil {
-		return tempUser, err
+		return tempUser, "", err
 	}
 
 	attempt, exists := s.loginAttempts[tempUser.Email]
@@ -45,7 +46,7 @@ func (s *LoginService) ConfirmUserCredentials(userCreds *credentials.Credentials
 	}
 
 	if attempt.LockedUntil != nil && attempt.LockedUntil.After(time.Now()) {
-		return tempUser, fmt.Errorf("account locked until %v", attempt.LockedUntil)
+		return tempUser, "", fmt.Errorf("account locked until %v", attempt.LockedUntil)
 	}
 
 	err = bcrypt.CompareHashAndPassword([]byte(tempUser.Password), []byte(userCreds.Password))
@@ -59,11 +60,16 @@ func (s *LoginService) ConfirmUserCredentials(userCreds *credentials.Credentials
 			attempt.FailedCount = 0
 		}
 
-		return tempUser, fmt.Errorf("invalid email or password")
+		return tempUser, "", fmt.Errorf("invalid email or password")
 	}
 
 	attempt.FailedCount = 0
 	attempt.LockedUntil = nil
 
-	return tempUser, nil
+	authToken, err := token.GenerateAuthToken(tempUser.ID, tempUser.Name, tempUser.Role)
+	if err != nil {
+		return tempUser, "", fmt.Errorf("failed to generate token: %v", err)
+	}
+
+	return tempUser, authToken, nil
 }

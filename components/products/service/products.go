@@ -1,9 +1,9 @@
 package service
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -16,7 +16,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jinzhu/gorm"
 	"github.com/xuri/excelize/v2"
-	"gorm.io/datatypes"
 )
 
 type ProductService struct {
@@ -37,10 +36,17 @@ func (s *ProductService) CreateProduct(newProduct *products.Products) error {
 	uow := repository.NewUnitOfWork(s.db, false)
 	defer uow.RollBack()
 
-	newProduct.ID = uuid.New()
-	newProduct.CreatedAt = time.Now()
-	newProduct.UpdatedAt = time.Now()
 	newProduct.IsActive = true
+	now := time.Now()
+	newProduct.CreatedAt = now
+	newProduct.UpdatedAt = now
+
+	for i := range newProduct.Images {
+		newProduct.Images[i].ID = uuid.New() // unique ID for each image need to check this
+		newProduct.Images[i].ProductID = newProduct.ID
+		newProduct.Images[i].CreatedAt = now
+		newProduct.Images[i].UpdatedAt = now
+	}
 
 	if err := s.repository.Add(uow, newProduct); err != nil {
 		return err
@@ -71,8 +77,7 @@ func (s *ProductService) UpdateProduct(productToUpdate *products.Products) error
 }
 
 func (s *ProductService) DeleteProduct(productToDelete *products.Products) error {
-	_, err := s.doesProductExist(productToDelete.ID)
-	if err != nil {
+	if _, err := s.doesProductExist(productToDelete.ID); err != nil {
 		return err
 	}
 
@@ -80,12 +85,18 @@ func (s *ProductService) DeleteProduct(productToDelete *products.Products) error
 	defer uow.RollBack()
 
 	now := time.Now()
+
 	updateMap := map[string]interface{}{
 		"DeletedAt": now,
-		"isActive":  false,
+		"is_active": false,
 	}
-
-	if err := s.repository.UpdateWithMap(uow, productToDelete, updateMap, repository.Filter("id=?", productToDelete.ID)); err != nil {
+	if err := s.repository.UpdateWithMap(uow, productToDelete, updateMap, repository.Filter("id = ?", productToDelete.ID)); err != nil {
+		return err
+	}
+	updateMapImages := map[string]interface{}{
+		"DeletedAt": now,
+	}
+	if err := s.repository.UpdateWithMap(uow, &products.ProductImage{}, updateMapImages, repository.Filter("product_id = ?", productToDelete.ID)); err != nil {
 		return err
 	}
 
@@ -93,36 +104,74 @@ func (s *ProductService) DeleteProduct(productToDelete *products.Products) error
 	return nil
 }
 
-func (s *ProductService) GetProductByID(id uuid.UUID) (*products.Products, error) {
+func (s *ProductService) GetProductByID(id string) (*products.DTO, error) {
 	uow := repository.NewUnitOfWork(s.db, true)
 	defer uow.RollBack()
 
 	var p products.Products
-	if err := s.repository.GetRecord(uow, &p, repository.Filter("id = ?", id)); err != nil {
+	queryProcessors := []repository.QueryProcessor{
+		repository.Filter("id = ?", id),
+		repository.NotDeleted(),
+		repository.Preload("Images"),
+	}
+
+	if err := s.repository.GetRecord(uow, &p, queryProcessors...); err != nil {
 		return nil, err
 	}
 
+	var images [][]byte
+	for _, img := range p.Images {
+		images = append(images, img.Image)
+	}
+
+	dto := &products.DTO{
+		ID:          p.ID,
+		Name:        p.Name,
+		Description: p.Description,
+		Price:       p.Price,
+		Images:      images,
+		CreatedAt:   p.CreatedAt,
+		UpdatedAt:   p.UpdatedAt,
+	}
+
 	uow.Commit()
-	return &p, nil
+	return dto, nil
 }
 
 func (s *ProductService) GetAllProducts(allProducts *[]products.DTO, limit, offset int, totalCount *int, requestForm url.Values) error {
 	uow := repository.NewUnitOfWork(s.db, true)
 	defer uow.RollBack()
 
-	var queryProcessors []repository.QueryProcessor
-	searchQuery := s.buildSearchQuery(requestForm)
-	if searchQuery != nil {
+	var productsList []products.Products
+	queryProcessors := []repository.QueryProcessor{
+		repository.NotDeleted(),
+		repository.Paginate(limit, offset, totalCount),
+		repository.Preload("Images"),
+	}
+
+	if searchQuery := s.buildSearchQuery(requestForm); searchQuery != nil {
 		queryProcessors = append(queryProcessors, searchQuery)
 	}
 
-	queryProcessors = append(queryProcessors, func(db *gorm.DB, out interface{}) (*gorm.DB, error) {
-		return db.Where("deleted_at IS NULL"), nil
-	})
-	queryProcessors = append(queryProcessors, repository.Paginate(limit, offset, totalCount))
-
-	if err := s.repository.GetAll(uow, allProducts, queryProcessors...); err != nil {
+	if err := s.repository.GetAll(uow, &productsList, queryProcessors...); err != nil {
 		return err
+	}
+
+	for _, p := range productsList {
+		var images [][]byte
+		for _, img := range p.Images {
+			images = append(images, img.Image)
+		}
+
+		*allProducts = append(*allProducts, products.DTO{
+			ID:          p.ID,
+			Name:        p.Name,
+			Description: p.Description,
+			Price:       p.Price,
+			Images:      images,
+			CreatedAt:   p.CreatedAt,
+			UpdatedAt:   p.UpdatedAt,
+		})
 	}
 
 	uow.Commit()
@@ -151,7 +200,7 @@ func (s *ProductService) buildSearchQuery(requestForm url.Values) repository.Que
 	var values []interface{}
 
 	if searchTerm := requestForm.Get("search"); searchTerm != "" {
-		columns := []string{"`name`", "`description`"}
+		columns := []string{"name", "description"}
 		for _, col := range columns {
 			util.AddToSlice(col, "LIKE ?", "OR", "%"+searchTerm+"%", &columnNames, &conditions, &operators, &values)
 		}
@@ -159,8 +208,7 @@ func (s *ProductService) buildSearchQuery(requestForm url.Values) repository.Que
 
 	return repository.FilterWithOperator(columnNames, conditions, operators, values)
 }
-
-func (s *ProductService) BulkCreateProducts(filePath string, imagesMap map[string][]byte) error {
+func (s *ProductService) BulkCreateProducts(filePath string) error {
 	f, err := excelize.OpenFile(filePath)
 	if err != nil {
 		return err
@@ -179,7 +227,7 @@ func (s *ProductService) BulkCreateProducts(filePath string, imagesMap map[strin
 		if i == 0 {
 			continue
 		}
-		if len(row) < 4 {
+		if len(row) < 3 {
 			return errors.NewValidationError(fmt.Sprintf("Row %d is incomplete", i+1))
 		}
 
@@ -188,30 +236,26 @@ func (s *ProductService) BulkCreateProducts(filePath string, imagesMap map[strin
 			return errors.NewValidationError(fmt.Sprintf("Invalid price at row %d", i+1))
 		}
 
-		var imagesBytes [][]byte
-		imageNames := strings.Split(row[3], ",")
-		for _, img := range imageNames {
-			img = strings.TrimSpace(img)
-			if b, ok := imagesMap[img]; ok {
-				imagesBytes = append(imagesBytes, b)
+		var images []products.ProductImage
+		for col := 3; col < len(row); col++ {
+			imgPath := strings.TrimSpace(row[col])
+			if imgPath != "" {
+				data, err := os.ReadFile(imgPath)
+				if err != nil {
+					return errors.NewValidationError(fmt.Sprintf("Could not read image %s at row %d: %v", imgPath, i+1, err))
+				}
+				images = append(images, products.ProductImage{
+					Image: data,
+				})
 			}
 		}
 
-		var imgJSON datatypes.JSON
-		if len(imagesBytes) > 0 {
-			bytes, _ := json.Marshal(imagesBytes)
-			imgJSON = datatypes.JSON(bytes)
-		}
-
 		p := products.Products{
-			ID:          uuid.New(),
 			Name:        row[0],
 			Description: row[1],
 			Price:       price,
 			IsActive:    true,
-			Images:      imgJSON,
-			CreatedAt:   time.Now(),
-			UpdatedAt:   time.Now(),
+			Images:      images,
 		}
 
 		if err := p.Validate(false); err != nil {

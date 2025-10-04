@@ -12,10 +12,9 @@ func RegisterModuleRoutes(app *app.App, repo repository.EcommerceRepository) {
 	registerUserRoutes(app, repo)
 	registerLoginRoutes(app, repo)
 	registerProductRoutes(app, repo)
-
 	registerCartRoutes(app, repo)
-
 	registerOrderRoutes(app, repo)
+	registerpaymentsRoutes(app, repo)
 
 	log.Print("[ All module routes registered successfully ]")
 }

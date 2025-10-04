@@ -2,14 +2,15 @@ package service
 
 import (
 	"crypto/rand"
-	"ecommerce/errors"
-	"ecommerce/models/user"
-	"ecommerce/repository"
-	"ecommerce/util"
 	"encoding/hex"
 	"fmt"
 	"net/url"
 	"time"
+
+	"ecommerce/errors"
+	"ecommerce/models/user"
+	"ecommerce/repository"
+	"ecommerce/util"
 
 	"github.com/google/uuid"
 	"github.com/jinzhu/gorm"
@@ -46,8 +47,7 @@ func (s *UserService) doesUserExist(ID uuid.UUID) (*user.User, error) {
 	defer uow.RollBack()
 
 	var existing user.User
-	err := s.repository.GetRecordForUser(uow, ID, &existing, "id")
-	if err != nil {
+	if err := s.repository.GetRecordForUser(uow, ID, &existing, "id"); err != nil {
 		return nil, errors.NewValidationError("User ID is invalid")
 	}
 
@@ -59,14 +59,11 @@ func (s *UserService) CreateUser(newUser *user.User) error {
 	uow := repository.NewUnitOfWork(s.db, false)
 	defer uow.RollBack()
 
-	hashedPassword, err := s.hashPassword(newUser.Password)
+	hashed, err := s.hashPassword(newUser.Password)
 	if err != nil {
 		return err
 	}
-	newUser.Password = hashedPassword
-	newUser.ID = uuid.New()
-	newUser.CreatedAt = time.Now()
-	newUser.UpdatedAt = time.Now()
+	newUser.Password = hashed
 	newUser.IsActive = true
 
 	if err := s.repository.Add(uow, newUser); err != nil {
@@ -77,7 +74,7 @@ func (s *UserService) CreateUser(newUser *user.User) error {
 	return nil
 }
 
-func (s *UserService) UpdateUser(userToUpdate *user.User) error {
+func (s *UserService) UpdateUserProfile(userToUpdate *user.User) error {
 	existing, err := s.doesUserExist(userToUpdate.ID)
 	if err != nil {
 		return err
@@ -98,6 +95,9 @@ func (s *UserService) UpdateUser(userToUpdate *user.User) error {
 	} else {
 		userToUpdate.Password = existing.Password
 	}
+
+	// Keep Role unchanged
+	userToUpdate.Role = existing.Role
 
 	if err := s.repository.Update(uow, userToUpdate); err != nil {
 		return err
@@ -154,10 +154,7 @@ func (s *UserService) GetAllUsers(allUsers *[]user.DTO, limit, offset int, total
 		queryProcessors = append(queryProcessors, searchQuery)
 	}
 
-	queryProcessors = append(queryProcessors, func(db *gorm.DB, out interface{}) (*gorm.DB, error) {
-		return db.Where("deleted_at IS NULL"), nil
-	})
-
+	queryProcessors = append(queryProcessors, repository.NotDeleted())
 	queryProcessors = append(queryProcessors, repository.Paginate(limit, offset, totalCount))
 
 	if err := s.repository.GetAll(uow, allUsers, queryProcessors...); err != nil {
@@ -198,8 +195,8 @@ func (s *UserService) GenerateResetToken(email string, validityMinutes int) (str
 		return "", errors.NewValidationError("Email not found")
 	}
 
-	tokenBytes := make([]byte, 32)                   //make is ued to make a slice here 32 length
-	if _, err := rand.Read(tokenBytes); err != nil { //rand.Read(tokenBytes) fills the slice with cryptographically secure random bytes.
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
 		return "", err
 	}
 	token := hex.EncodeToString(tokenBytes)
@@ -240,11 +237,11 @@ func (s *UserService) ResetPasswordWithToken(email, token, newPassword string) e
 		return errors.NewValidationError("Reset token expired")
 	}
 
-	hashedPassword, err := s.hashPassword(newPassword)
+	hashed, err := s.hashPassword(newPassword)
 	if err != nil {
 		return err
 	}
-	u.Password = hashedPassword
+	u.Password = hashed
 	u.ResetToken = ""
 	u.ResetTokenExpiresAt = nil
 	u.UpdatedAt = time.Now()

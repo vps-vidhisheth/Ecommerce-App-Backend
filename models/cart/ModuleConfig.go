@@ -23,7 +23,8 @@ func (config *ModuleConfig) TableMigration(wg *sync.WaitGroup) {
 		defer wg.Done()
 	}
 	var models []interface{} = []interface{}{ //[]interface{} is like list of anything and here it is
-		&Cart{}, //pointer to cart struct rather than direct struct
+		&Cart{},
+		&CartProduct{}, //pointer to cart struct rather than direct struct
 	}
 
 	for _, model := range models {
