@@ -59,15 +59,19 @@ func (s *CartService) CreateCart(newCart *cart.Cart) (*cart.Cart, error) {
 	uow := repository.NewUnitOfWork(s.db, false)
 	defer uow.RollBack()
 
+	// Validate all product IDs before proceeding
 	for i := range newCart.Products {
 		var product products.Products
 		err := s.repository.GetRecord(uow, &product,
-			repository.Filter("id = ? AND deleted_at IS NULL AND is_active = ?", newCart.Products[i].ProductID, true))
+			repository.Filter("id = ? AND is_active = ?", newCart.Products[i].ProductID, true),
+			repository.NotDeleted(),
+		)
 		if err != nil {
 			return nil, errors.NewValidationError("invalid or inactive product")
 		}
 	}
 
+	// Check for existing cart for user
 	var existingCarts []cart.Cart
 	err := s.repository.GetAll(uow, &existingCarts,
 		repository.Filter("user_id = ?", newCart.UserID),
@@ -77,6 +81,7 @@ func (s *CartService) CreateCart(newCart *cart.Cart) (*cart.Cart, error) {
 		return nil, err
 	}
 
+	// If existing cart found — update it
 	if len(existingCarts) > 0 {
 		existing := existingCarts[0]
 
@@ -86,6 +91,7 @@ func (s *CartService) CreateCart(newCart *cart.Cart) (*cart.Cart, error) {
 				return nil, err
 			}
 		}
+
 		if err := s.calculateTotalAmount(&existing); err != nil {
 			return nil, err
 		}
@@ -113,7 +119,7 @@ func (s *CartService) CreateCart(newCart *cart.Cart) (*cart.Cart, error) {
 	return newCart, nil
 }
 
-func (s *CartService) UpdateCartProductQuantity(cartID, userID uuid.UUID, productID uuid.UUID, newQty int) (*cart.Cart, error) {
+func (s *CartService) UpdateCartProductQuantity(cartID, userID, productID uuid.UUID, newQty int) (*cart.Cart, error) {
 	uow := repository.NewUnitOfWork(s.db, false)
 	defer uow.RollBack()
 
@@ -146,6 +152,7 @@ func (s *CartService) UpdateCartProductQuantity(cartID, userID uuid.UUID, produc
 		"updated_at": cpToUpdate.UpdatedAt,
 	},
 		repository.Filter("cart_id = ? AND product_id = ?", cartID, productID),
+		repository.NotDeleted(),
 	)
 	if err != nil {
 		return nil, err
@@ -154,12 +161,14 @@ func (s *CartService) UpdateCartProductQuantity(cartID, userID uuid.UUID, produc
 	if err := s.calculateTotalAmount(&existingCart); err != nil {
 		return nil, err
 	}
+
 	existingCart.UpdatedAt = time.Now()
 	err = s.repository.UpdateWithMap(uow, &cart.Cart{}, map[string]interface{}{
 		"total_amount": existingCart.TotalAmount,
 		"updated_at":   existingCart.UpdatedAt,
 	},
 		repository.Filter("id = ?", existingCart.ID),
+		repository.NotDeleted(),
 	)
 	if err != nil {
 		return nil, err
@@ -175,7 +184,10 @@ func (s *CartService) GetCartByUserID(userID uuid.UUID) ([]cart.Cart, error) {
 
 	var carts []cart.Cart
 	err := s.repository.GetAll(uow, &carts,
-		repository.Filter("user_id = ?", userID), repository.NotDeleted(), repository.Preload("Products"))
+		repository.Filter("user_id = ?", userID),
+		repository.NotDeleted(),
+		repository.Preload("Products"),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -219,6 +231,7 @@ func (s *CartService) DeleteProductFromCart(cartID, userID, productID uuid.UUID)
 		"deleted_at": time.Now(),
 	},
 		repository.Filter("cart_id = ? AND product_id = ?", cartID, productID),
+		repository.NotDeleted(),
 	)
 	if err != nil {
 		return nil, err
@@ -236,6 +249,7 @@ func (s *CartService) DeleteProductFromCart(cartID, userID, productID uuid.UUID)
 		"updated_at":   c.UpdatedAt,
 	},
 		repository.Filter("id = ?", c.ID),
+		repository.NotDeleted(),
 	)
 	if err != nil {
 		return nil, err
@@ -258,7 +272,11 @@ func (s *CartService) GetCartByID(id uuid.UUID) (*cart.Cart, error) {
 	defer uow.RollBack()
 
 	var c cart.Cart
-	err := s.repository.GetRecord(uow, &c, repository.Filter("id = ?", id), repository.NotDeleted(), repository.Preload("Products"))
+	err := s.repository.GetRecord(uow, &c,
+		repository.Filter("id = ?", id),
+		repository.NotDeleted(),
+		repository.Preload("Products"),
+	)
 	if err != nil {
 		return nil, err
 	}

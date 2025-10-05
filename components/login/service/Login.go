@@ -38,8 +38,6 @@ func (s *LoginService) ConfirmUserCredentials(userCreds *credentials.Credentials
 	if err != nil {
 		return tempUser, "", err
 	}
-
-	// ======= NEW: Check if user is active =======
 	if !tempUser.IsActive {
 		return tempUser, "", fmt.Errorf("account is inactive, please contact admin")
 	}

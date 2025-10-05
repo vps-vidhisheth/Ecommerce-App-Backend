@@ -68,7 +68,7 @@ func (s *OrderService) DeleteOrder(orderToDelete *order.Order) error {
 
 	updateMap := map[string]interface{}{
 		"status":     "canceled",
-		"updated_at": gorm.Expr("NOW()"),
+		"updated_at": time.Now(),
 	}
 
 	if err := s.repository.UpdateWithMap(

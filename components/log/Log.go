@@ -1,4 +1,3 @@
-// package log
 package log
 
 import "fmt"

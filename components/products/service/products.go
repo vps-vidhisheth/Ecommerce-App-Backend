@@ -36,10 +36,6 @@ func (s *ProductService) CreateProduct(newProduct *products.Products) error {
 	uow := repository.NewUnitOfWork(s.db, false)
 	defer uow.RollBack()
 
-	if err := newProduct.Validate(false); err != nil {
-		return err
-	}
-
 	newProduct.IsActive = true
 	now := time.Now()
 	newProduct.CreatedAt = now
