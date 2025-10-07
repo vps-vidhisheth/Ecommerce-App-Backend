@@ -74,6 +74,36 @@ func (s *UserService) CreateUser(newUser *user.User) error {
 	return nil
 }
 
+func (s *UserService) UpdateUserRole(userID uuid.UUID, newRole string) error {
+	uow := repository.NewUnitOfWork(s.db, false)
+	defer uow.RollBack()
+
+	var targetUser user.User
+	if err := s.repository.GetRecordForUser(uow, userID, &targetUser, "id"); err != nil {
+		return errors.NewValidationError("User not found")
+	}
+
+	if newRole != "admin" && newRole != "customer" {
+		return errors.NewValidationError("Invalid role: must be 'admin' or 'customer'")
+	}
+
+	if targetUser.Role == newRole {
+		return errors.NewValidationError(fmt.Sprintf("User already has role '%s'", newRole))
+	}
+
+	updateMap := map[string]interface{}{
+		"Role":      newRole,
+		"UpdatedAt": time.Now(),
+	}
+
+	if err := s.repository.UpdateWithMap(uow, &targetUser, updateMap, repository.Filter("id = ?", userID)); err != nil {
+		return err
+	}
+
+	uow.Commit()
+	return nil
+}
+
 func (s *UserService) UpdateUserProfile(userToUpdate *user.User) error {
 	existing, err := s.doesUserExist(userToUpdate.ID)
 	if err != nil {
@@ -117,8 +147,10 @@ func (s *UserService) DeleteUser(userToDelete *user.User) error {
 
 	now := time.Now()
 	updateMap := map[string]interface{}{
-		"DeletedAt": now,
-		"IsActive":  false,
+		"DeletedAt":           now,
+		"IsActive":            false,
+		"ResetToken":          "",
+		"ResetTokenExpiresAt": nil,
 	}
 
 	if err := s.repository.UpdateWithMap(uow, existing, updateMap, repository.Filter("id = ?", existing.ID)); err != nil {
@@ -142,7 +174,7 @@ func (s *UserService) GetUserByID(id uuid.UUID) (*user.User, error) {
 	return &u, nil
 }
 
-func (s *UserService) GetAllUsers(allUsers *[]user.DTO, limit, offset int, totalCount *int, requestForm url.Values) error {
+func (s *UserService) GetAllUsers(allUsers *[]user.DTO, limit, offset int, totalCount *int, requestForm url.Values, currentUserID uuid.UUID) error {
 	uow := repository.NewUnitOfWork(s.db, true)
 	defer uow.RollBack()
 
@@ -152,6 +184,8 @@ func (s *UserService) GetAllUsers(allUsers *[]user.DTO, limit, offset int, total
 	if searchQuery != nil {
 		queryProcessors = append(queryProcessors, searchQuery)
 	}
+
+	queryProcessors = append(queryProcessors, repository.Filter("id != ?", currentUserID))
 
 	queryProcessors = append(queryProcessors, repository.NotDeleted())
 	queryProcessors = append(queryProcessors, repository.Paginate(limit, offset, totalCount))
@@ -220,6 +254,23 @@ func (s *UserService) GenerateResetToken(email string, validityMinutes int) (str
 	return token, nil
 }
 
+func (s *UserService) EnsureActiveUser(userID uuid.UUID, tokenIAT int64) (*user.User, error) {
+	u, err := s.doesUserExist(userID)
+	if err != nil {
+		return nil, err
+	}
+
+	if !u.IsActive {
+		return nil, errors.NewValidationError("User is inactive. Please login again.")
+	}
+
+	if u.LastDeactivatedAt != nil && tokenIAT < u.LastDeactivatedAt.Unix() {
+		return nil, errors.NewValidationError("Token issued before deactivation. Please login again.")
+	}
+
+	return u, nil
+}
+
 func (s *UserService) ResetPasswordWithToken(email, token, newPassword string) error {
 	uow := repository.NewUnitOfWork(s.db, false)
 	defer uow.RollBack()
@@ -265,6 +316,11 @@ func (s *UserService) UpdateUserStatus(userID uuid.UUID, isActive bool) error {
 	updateMap := map[string]interface{}{
 		"IsActive":  isActive,
 		"UpdatedAt": time.Now(),
+	}
+
+	if !isActive {
+		now := time.Now()
+		updateMap["LastDeactivatedAt"] = &now
 	}
 
 	if err := s.repository.UpdateWithMap(uow, existing, updateMap, repository.Filter("id = ?", existing.ID)); err != nil {

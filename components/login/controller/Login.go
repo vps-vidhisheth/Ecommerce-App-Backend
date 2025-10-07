@@ -38,10 +38,17 @@ func (c *LoginController) UserLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if userCredentials.Captcha == "" {
+		web.RespondError(w, errors.NewHTTPError("captcha is required", http.StatusBadRequest))
+		return
+	}
+
 	targetUser, authToken, err := c.service.ConfirmUserCredentials(&userCredentials)
 	if err != nil {
 		c.log.Print(err.Error())
-		if err.Error()[:12] == "account locked" {
+		if len(err.Error()) >= 12 && err.Error()[:12] == "account locked" {
+			web.RespondError(w, errors.NewHTTPError(err.Error(), http.StatusForbidden))
+		} else if err.Error()[:15] == "captcha verific" {
 			web.RespondError(w, errors.NewHTTPError(err.Error(), http.StatusForbidden))
 		} else {
 			web.RespondError(w, errors.NewHTTPError("invalid email or password", http.StatusUnauthorized))

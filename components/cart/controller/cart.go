@@ -3,6 +3,7 @@ package controller
 import (
 	"ecommerce/components/cart/service"
 	"ecommerce/components/log"
+	Userservice "ecommerce/components/user/service"
 	"ecommerce/errors"
 	"ecommerce/models/cart"
 	authmiddleware "ecommerce/security/authMiddleWare"
@@ -14,30 +15,36 @@ import (
 )
 
 type CartController struct {
-	log     log.Log
-	service *service.CartService
+	log         log.Log
+	service     *service.CartService
+	userService *Userservice.UserService
 }
 
-func NewCartController(cartService *service.CartService, logger log.Log) *CartController {
+func NewCartController(cartService *service.CartService, logger log.Log, userService *Userservice.UserService) *CartController {
 	return &CartController{
-		log:     logger,
-		service: cartService,
+		log:         logger,
+		service:     cartService,
+		userService: userService,
 	}
 }
 
 func (c *CartController) RegisterRoutes(router *mux.Router) {
 	cartRouter := router.PathPrefix("/carts").Subrouter()
-	cartRouter.Use(authmiddleware.AuthMiddleware)
+
+	authMiddleware := func(next http.Handler) http.Handler {
+		return authmiddleware.AuthMiddleware(c.userService, next)
+	}
+	cartRouter.Use(authMiddleware)
 
 	cartRouter.Handle("/{id}", http.HandlerFunc(c.GetCartByID)).Methods(http.MethodGet)
-	cartRouter.Handle("/user/{user_id}", http.HandlerFunc(c.GetCartByUserID)).Methods(http.MethodGet)
-	cartRouter.Handle("/user/{user_id}/total", http.HandlerFunc(c.GetTotalAmountByUserID)).Methods(http.MethodGet)
+	cartRouter.Handle("/user/{userID}", http.HandlerFunc(c.GetCartByUserID)).Methods(http.MethodGet)
+	cartRouter.Handle("/user/{userID}/total", http.HandlerFunc(c.GetTotalAmountByUserID)).Methods(http.MethodGet)
 	cartRouter.Handle("", http.HandlerFunc(c.CreateCart)).Methods(http.MethodPost)
 	cartRouter.Handle("/{id}/products/{product_id}", http.HandlerFunc(c.DeleteProductFromCart)).Methods(http.MethodDelete)
 	cartRouter.Handle("/{cartID}/products/{productID}/quantity", http.HandlerFunc(c.UpdateCartProductQuantity)).Methods(http.MethodPut)
+
 	c.log.Print("======== Cart Routes Registered =========")
 }
-
 func (c *CartController) CreateCart(w http.ResponseWriter, r *http.Request) {
 	var newCart cart.Cart
 	if err := web.UnmarshalJSON(r, &newCart); err != nil {
@@ -150,7 +157,7 @@ func (c *CartController) GetCartByUserID(w http.ResponseWriter, r *http.Request)
 
 func (c *CartController) GetTotalAmountByUserID(w http.ResponseWriter, r *http.Request) {
 	parser := web.NewParser(r)
-	userIDStr := parser.GetParameter("user_id")
+	userIDStr := parser.GetParameter("userID")
 	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
 		web.RespondError(w, errors.NewValidationError("invalid user id"))
@@ -164,13 +171,13 @@ func (c *CartController) GetTotalAmountByUserID(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	web.RespondJSON(w, http.StatusOK, map[string]float64{"total_amount": total})
+	web.RespondJSON(w, http.StatusOK, map[string]float64{"totalAmount": total})
 }
 
 func (c *CartController) DeleteProductFromCart(w http.ResponseWriter, r *http.Request) {
 	parser := web.NewParser(r)
 	cartIDStr := parser.GetParameter("id")
-	productIDStr := parser.GetParameter("product_id")
+	productIDStr := parser.GetParameter("productID")
 
 	cartID, err := uuid.Parse(cartIDStr)
 	if err != nil {

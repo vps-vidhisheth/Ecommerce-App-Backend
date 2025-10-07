@@ -14,6 +14,7 @@ type Claims struct {
 	UserId   string `json:"UserId"`
 	UserName string `json:"UserName"`
 	Role     string `json:"role"`
+
 	jwt.StandardClaims
 }
 
@@ -25,6 +26,7 @@ func GenerateAuthToken(userId uuid.UUID, userName string, role string) (string, 
 		Role:     role,
 		StandardClaims: jwt.StandardClaims{
 			ExpiresAt: expirationTime.Unix(),
+			IssuedAt:  time.Now().Unix(),
 		},
 	}
 
@@ -32,7 +34,7 @@ func GenerateAuthToken(userId uuid.UUID, userName string, role string) (string, 
 	jwtSecret := viper.GetString("JWT_SECRET")
 
 	if jwtSecret == "" {
-		log.GetLogger().Print("JWT_SECRET not found in environment variables-->")
+		log.GetLogger().Print("JWT_SECRET not found in environment variables")
 	}
 
 	tokenString, err := token.SignedString([]byte(jwtSecret))

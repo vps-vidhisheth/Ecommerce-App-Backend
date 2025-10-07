@@ -59,7 +59,6 @@ func (s *CartService) CreateCart(newCart *cart.Cart) (*cart.Cart, error) {
 	uow := repository.NewUnitOfWork(s.db, false)
 	defer uow.RollBack()
 
-	// Validate all product IDs before proceeding
 	for i := range newCart.Products {
 		var product products.Products
 		err := s.repository.GetRecord(uow, &product,
@@ -71,35 +70,59 @@ func (s *CartService) CreateCart(newCart *cart.Cart) (*cart.Cart, error) {
 		}
 	}
 
-	// Check for existing cart for user
 	var existingCarts []cart.Cart
 	err := s.repository.GetAll(uow, &existingCarts,
 		repository.Filter("user_id = ?", newCart.UserID),
 		repository.NotDeleted(),
+		repository.Preload("Products"),
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	// If existing cart found — update it
 	if len(existingCarts) > 0 {
 		existing := existingCarts[0]
 
-		for i := range newCart.Products {
-			newCart.Products[i].CartID = existing.ID
-			if err := s.repository.Add(uow, &newCart.Products[i]); err != nil {
-				return nil, err
+		for _, newProd := range newCart.Products {
+			found := false
+			for i := range existing.Products {
+				if existing.Products[i].ProductID == newProd.ProductID {
+					existing.Products[i].Quantity += newProd.Quantity
+					existing.Products[i].UpdatedAt = time.Now()
+
+					err = s.repository.UpdateWithMap(uow, &cart.CartProduct{}, map[string]interface{}{
+						"quantity":   existing.Products[i].Quantity,
+						"updated_at": existing.Products[i].UpdatedAt,
+					},
+						repository.Filter("cart_id = ? AND product_id = ?", existing.ID, newProd.ProductID),
+						repository.NotDeleted(),
+					)
+					if err != nil {
+						return nil, err
+					}
+					found = true
+					break
+				}
+			}
+			if !found {
+				newProd.CartID = existing.ID
+				if err := s.repository.Add(uow, &newProd); err != nil {
+					return nil, err
+				}
+				existing.Products = append(existing.Products, newProd)
 			}
 		}
 
 		if err := s.calculateTotalAmount(&existing); err != nil {
 			return nil, err
 		}
-
-		if err := s.repository.UpdateWithMap(uow, &existing, map[string]interface{}{
-			"total_amount": existing.TotalAmount,
-			"updated_at":   time.Now(),
-		}); err != nil {
+		if err := s.repository.UpdateWithMap(uow, &cart.Cart{}, map[string]interface{}{
+			"totalAmount": existing.TotalAmount,
+			"updated_at":  time.Now(),
+		},
+			repository.Filter("id = ?", existing.ID),
+			repository.NotDeleted(),
+		); err != nil {
 			return nil, err
 		}
 
@@ -164,8 +187,8 @@ func (s *CartService) UpdateCartProductQuantity(cartID, userID, productID uuid.U
 
 	existingCart.UpdatedAt = time.Now()
 	err = s.repository.UpdateWithMap(uow, &cart.Cart{}, map[string]interface{}{
-		"total_amount": existingCart.TotalAmount,
-		"updated_at":   existingCart.UpdatedAt,
+		"totalAmount": existingCart.TotalAmount,
+		"updated_at":  existingCart.UpdatedAt,
 	},
 		repository.Filter("id = ?", existingCart.ID),
 		repository.NotDeleted(),
@@ -245,8 +268,8 @@ func (s *CartService) DeleteProductFromCart(cartID, userID, productID uuid.UUID)
 
 	c.UpdatedAt = time.Now()
 	err = s.repository.UpdateWithMap(uow, &cart.Cart{}, map[string]interface{}{
-		"total_amount": c.TotalAmount,
-		"updated_at":   c.UpdatedAt,
+		"totalAmount": c.TotalAmount,
+		"updated_at":  c.UpdatedAt,
 	},
 		repository.Filter("id = ?", c.ID),
 		repository.NotDeleted(),

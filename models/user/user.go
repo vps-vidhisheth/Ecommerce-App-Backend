@@ -16,10 +16,11 @@ type User struct {
 	Email               string     `gorm:"type:varchar(100);unique;not null" json:"email"`
 	Password            string     `gorm:"type:varchar(255);not null" json:"password"`
 	Role                string     `gorm:"type:varchar(50);not null" json:"role"`
-	ProfilePic          []byte     `gorm:"type:LONGBLOB" json:"profile_pic,omitempty"`
-	IsActive            bool       `gorm:"default:true" json:"is_active"`
-	ResetToken          string     `gorm:"type:varchar(255);index" json:"reset_token,omitempty"`
-	ResetTokenExpiresAt *time.Time `json:"reset_token_expires_at,omitempty"`
+	ProfilePic          []byte     `gorm:"type:LONGBLOB" json:"profilePic,omitempty"`
+	IsActive            bool       `gorm:"default:true" json:"isActive"`
+	LastDeactivatedAt   *time.Time `json:"lastDeactivatedAt,omitempty"`
+	ResetToken          string     `gorm:"type:varchar(255);index" json:"resetToken,omitempty"`
+	ResetTokenExpiresAt *time.Time `json:"resetTokenExpiresAt,omitempty"`
 }
 
 func (u *User) Validate(isUpdate bool) error {
@@ -52,8 +53,8 @@ type DTO struct {
 	Name       string    `json:"name"`
 	Email      string    `json:"email"`
 	Role       string    `json:"role"`
-	ProfilePic []byte    `json:"profile_pic"`
-	IsActive   bool      `json:"is_active"`
+	ProfilePic []byte    `json:"profilePic"`
+	IsActive   bool      `json:"isActive"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }

@@ -5,6 +5,7 @@ import (
 	"ecommerce/components/log"
 	orderService "ecommerce/components/order/service"
 	paymentService "ecommerce/components/payments/service"
+	Userservice "ecommerce/components/user/service"
 	orderModel "ecommerce/models/order"
 	paymentModel "ecommerce/models/payments"
 	authmiddleware "ecommerce/security/authMiddleWare"
@@ -30,20 +31,25 @@ func NewPaymentController(paymentService *paymentService.PaymentService, orderSe
 	}
 }
 
-func (c *PaymentController) RegisterRoutes(router *mux.Router) {
+func (c *PaymentController) RegisterRoutes(router *mux.Router, userService *Userservice.UserService) {
 	paymentRouter := router.PathPrefix("/payments").Subrouter()
-	paymentRouter.Use(authmiddleware.AuthMiddleware)
+
+	authMiddleware := func(next http.Handler) http.Handler {
+		return authmiddleware.AuthMiddleware(userService, next)
+	}
+	paymentRouter.Use(authMiddleware)
 
 	paymentRouter.HandleFunc("", c.CreatePayment).Methods(http.MethodPost)
 
 	adminRouter := router.PathPrefix("/payments").Subrouter()
-	adminRouter.Use(authmiddleware.AuthMiddleware)
+	adminRouter.Use(authMiddleware)
 	adminRouter.Use(authmiddleware.AdminMiddleware)
 
 	adminRouter.HandleFunc("", c.GetAllPayments).Methods(http.MethodGet)
 
 	c.log.Print("======== Payment Routes Registered =========")
 }
+
 func (c *PaymentController) CreatePayment(w http.ResponseWriter, r *http.Request) {
 	var newPayment paymentModel.Payment
 	if err := web.UnmarshalJSON(r, &newPayment); err != nil {
@@ -57,33 +63,28 @@ func (c *PaymentController) CreatePayment(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	newOrder := orderModel.Order{
-		UserID: userID,
-		CartID: newPayment.CartID,
-	}
-
-	if err := newOrder.Validate(false); err != nil {
-		c.log.Print("Order validation failed: ", err)
-		web.RespondError(w, err)
-		return
-	}
-
-	if err := c.orderService.CreateOrder(&newOrder); err != nil {
-		c.log.Print("Order creation failed: ", err)
-		web.RespondError(w, err)
-		return
-	}
-
 	totalAmount, err := c.cartService.GetTotalAmountByCartID(newPayment.CartID)
 	if err != nil {
 		c.log.Print("Failed to calculate cart total: ", err)
 		web.RespondError(w, err)
 		return
 	}
+
 	newPayment.UserID = userID
-	newPayment.OrderID = newOrder.ID
 	newPayment.Amount = totalAmount
 
+	newOrder := orderModel.Order{
+		UserID: userID,
+		CartID: newPayment.CartID,
+	}
+
+	if err := c.orderService.CreateOrder(&newOrder, totalAmount); err != nil {
+		c.log.Print("Order creation failed: ", err)
+		web.RespondError(w, err)
+		return
+	}
+
+	newPayment.OrderID = newOrder.ID
 	if err := newPayment.Validate(false); err != nil {
 		web.RespondError(w, err)
 		return

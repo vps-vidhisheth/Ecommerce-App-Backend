@@ -3,6 +3,7 @@ package order
 import (
 	"ecommerce/errors"
 	"ecommerce/models/baseStruct"
+	"ecommerce/models/products"
 	"time"
 
 	"github.com/google/uuid"
@@ -10,10 +11,11 @@ import (
 
 type Order struct {
 	baseStruct.Base
-	UserID      uuid.UUID `gorm:"type:char(36);not null" json:"user_id"`
-	CartID      uuid.UUID `gorm:"type:char(36);not null" json:"cart_id"`
-	Status      string    `gorm:"type:varchar(20);not null;default:'confirmed'" json:"status"`
-	TotalAmount float64   `gorm:"type:decimal(10,2);default:0" json:"total_amount"`
+	UserID      uuid.UUID           `gorm:"type:char(36);not null" json:"userID"`
+	CartID      uuid.UUID           `gorm:"type:char(36);not null" json:"cartID"`
+	Status      string              `gorm:"type:varchar(20);not null;default:'confirmed'" json:"status"`
+	TotalAmount float64             `gorm:"type:decimal(10,2);default:0" json:"totalAmount"`
+	Products    []products.Products `gorm:"many2many:orderProducts;" json:"products"`
 }
 
 func (o *Order) Validate(isUpdate bool) error {
@@ -31,10 +33,10 @@ func (o *Order) Validate(isUpdate bool) error {
 
 type DTO struct {
 	ID          uuid.UUID `json:"id"`
-	UserID      uuid.UUID `json:"user_id"`
-	CartID      uuid.UUID `json:"cart_id"`
+	UserID      uuid.UUID `json:"userID"`
+	CartID      uuid.UUID `json:"cartID"`
 	Status      string    `json:"status"`
-	TotalAmount float64   `json:"total_amount"`
+	TotalAmount float64   `json:"totalAmount"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }

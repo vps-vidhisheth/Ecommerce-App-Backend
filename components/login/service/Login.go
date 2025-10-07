@@ -8,6 +8,7 @@ import (
 	"ecommerce/models/login"
 	"ecommerce/models/user"
 	"ecommerce/repository"
+	security "ecommerce/security/captcha"
 	"ecommerce/security/token"
 
 	"github.com/jinzhu/gorm"
@@ -29,17 +30,25 @@ func NewLoginService(db *gorm.DB, repo repository.EcommerceRepository) *LoginSer
 }
 
 func (s *LoginService) ConfirmUserCredentials(userCreds *credentials.Credentials) (user.User, string, error) {
+	if err := security.VerifyRecaptcha(userCreds.Captcha); err != nil {
+		return user.User{}, "", fmt.Errorf("captcha verification failed: %v", err)
+	}
+
 	uow := repository.NewUnitOfWork(s.db, false)
 	defer uow.RollBack()
 
 	var tempUser user.User
-	err := s.repository.GetRecord(uow, &tempUser,
-		repository.Filter("`email` = ?", userCreds.Email))
+	err := s.repository.GetRecord(uow, &tempUser, repository.Filter("`email` = ?", userCreds.Email))
 	if err != nil {
 		return tempUser, "", err
 	}
+
 	if !tempUser.IsActive {
 		return tempUser, "", fmt.Errorf("account is inactive, please contact admin")
+	}
+
+	if userCreds.Role != "" && tempUser.Role != userCreds.Role {
+		return tempUser, "", fmt.Errorf("invalid role for this account")
 	}
 
 	attempt, exists := s.loginAttempts[tempUser.Email]
@@ -63,7 +72,7 @@ func (s *LoginService) ConfirmUserCredentials(userCreds *credentials.Credentials
 			attempt.FailedCount = 0
 		}
 
-		return tempUser, "", fmt.Errorf("invalid email or password")
+		return tempUser, "", fmt.Errorf("invalid email or password or role ")
 	}
 
 	attempt.FailedCount = 0

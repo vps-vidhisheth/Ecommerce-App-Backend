@@ -3,6 +3,8 @@ package controller
 import (
 	"ecommerce/components/log"
 	"ecommerce/components/products/service"
+	Userservice "ecommerce/components/user/service"
+	"ecommerce/models/baseStruct"
 	"ecommerce/models/products"
 	authmiddleware "ecommerce/security/authMiddleWare"
 	"ecommerce/util"
@@ -10,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -27,17 +30,25 @@ func NewProductController(productservice *service.ProductService, logger log.Log
 	}
 }
 
-func (c *ProductController) RegisterRoutes(router *mux.Router) {
+func (c *ProductController) RegisterRoutes(router *mux.Router, userService *Userservice.UserService) {
 	productRouter := router.PathPrefix("/products").Subrouter()
+	productRouter.Use(func(h http.Handler) http.Handler {
+		return authmiddleware.AuthMiddleware(userService, h)
+	})
 
-	productRouter.Handle("", authmiddleware.AuthMiddleware(http.HandlerFunc(c.GetAllProducts))).Methods(http.MethodGet)
-	productRouter.Handle("/{id}", authmiddleware.AuthMiddleware(http.HandlerFunc(c.GetProductByID))).Methods(http.MethodGet)
+	productRouter.HandleFunc("", c.GetAllProducts).Methods(http.MethodGet)
+	productRouter.HandleFunc("/{id}", c.GetProductByID).Methods(http.MethodGet)
 
 	adminRouter := router.PathPrefix("/products").Subrouter()
-	adminRouter.Handle("", authmiddleware.AuthMiddleware(authmiddleware.AdminMiddleware(http.HandlerFunc(c.CreateProduct)))).Methods(http.MethodPost)
-	adminRouter.Handle("/{id}", authmiddleware.AuthMiddleware(authmiddleware.AdminMiddleware(http.HandlerFunc(c.UpdateProduct)))).Methods(http.MethodPut)
-	adminRouter.Handle("/{id}", authmiddleware.AuthMiddleware(authmiddleware.AdminMiddleware(http.HandlerFunc(c.DeleteProduct)))).Methods(http.MethodDelete)
-	adminRouter.Handle("/bulk", authmiddleware.AuthMiddleware(authmiddleware.AdminMiddleware(http.HandlerFunc(c.BulkCreateProducts)))).Methods(http.MethodPost)
+	adminRouter.Use(func(h http.Handler) http.Handler {
+		return authmiddleware.AuthMiddleware(userService, authmiddleware.AdminMiddleware(h))
+	})
+
+	adminRouter.HandleFunc("", c.CreateProduct).Methods(http.MethodPost)
+	adminRouter.HandleFunc("/{id}", c.UpdateProduct).Methods(http.MethodPut)
+	adminRouter.HandleFunc("/{id}", c.DeleteProduct).Methods(http.MethodDelete)
+	adminRouter.HandleFunc("/bulk", c.BulkCreateProducts).Methods(http.MethodPost)
+	adminRouter.HandleFunc("/{productId}/images/{imageId}", c.DeleteProductImage).Methods(http.MethodDelete)
 	c.log.Print("======== Product Routes Registered =========")
 }
 
@@ -48,11 +59,17 @@ func (c *ProductController) CreateProduct(w http.ResponseWriter, r *http.Request
 	}
 
 	price, _ := strconv.ParseFloat(r.FormValue("price"), 64)
+
+	isActive := false
+	if strings.ToLower(r.FormValue("is_active")) == "true" {
+		isActive = true
+	}
+
 	newProduct := products.Products{
 		Name:        r.FormValue("name"),
 		Description: r.FormValue("description"),
 		Price:       price,
-		IsActive:    true,
+		IsActive:    isActive,
 	}
 
 	if err := newProduct.Validate(false); err != nil {
@@ -85,7 +102,25 @@ func (c *ProductController) CreateProduct(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	web.RespondJSON(w, http.StatusCreated, newProduct)
+	web.RespondJSON(w, http.StatusCreated, products.ToDTO(&newProduct))
+
+}
+
+func (c *ProductController) DeleteProductImage(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	productID := vars["productId"]
+	imageID, err := uuid.Parse(vars["imageId"])
+	if err != nil {
+		web.RespondError(w, err)
+		return
+	}
+
+	if err := c.service.DeleteProductImage(productID, imageID); err != nil {
+		web.RespondError(w, err)
+		return
+	}
+
+	web.RespondJSON(w, http.StatusOK, "Product image deleted successfully")
 }
 
 func (c *ProductController) UpdateProduct(w http.ResponseWriter, r *http.Request) {
@@ -100,19 +135,26 @@ func (c *ProductController) UpdateProduct(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	price, _ := strconv.ParseFloat(r.FormValue("price"), 64) //form value always returns a string
+	price, _ := strconv.ParseFloat(r.FormValue("price"), 64)
+	isActive := false
+	if strings.ToLower(r.FormValue("is_active")) == "true" {
+		isActive = true
+	}
+
 	productToUpdate := products.Products{
+		Base:        baseStruct.Base{ID: id},
 		Name:        r.FormValue("name"),
 		Description: r.FormValue("description"),
 		Price:       price,
+		IsActive:    isActive,
 	}
-	productToUpdate.ID = id
 
 	if err := productToUpdate.Validate(true); err != nil {
 		web.RespondError(w, err)
 		return
 	}
 
+	// Add new uploaded images
 	files := r.MultipartForm.File["images"]
 	for _, fileHeader := range files {
 		file, err := fileHeader.Open()
@@ -133,12 +175,23 @@ func (c *ProductController) UpdateProduct(w http.ResponseWriter, r *http.Request
 		})
 	}
 
+	removedImageIds := r.MultipartForm.Value["removedImageIds[]"]
+	for _, idStr := range removedImageIds {
+		imageUUID, err := uuid.Parse(idStr)
+		if err == nil {
+			if err := c.service.DeleteProductImage(id.String(), imageUUID); err != nil {
+				web.RespondError(w, err)
+				return
+			}
+		}
+	}
+
 	if err := c.service.UpdateProduct(&productToUpdate); err != nil {
 		web.RespondError(w, err)
 		return
 	}
 
-	web.RespondJSON(w, http.StatusOK, productToUpdate)
+	web.RespondJSON(w, http.StatusOK, products.ToDTO(&productToUpdate))
 }
 
 func (c *ProductController) DeleteProduct(w http.ResponseWriter, r *http.Request) {

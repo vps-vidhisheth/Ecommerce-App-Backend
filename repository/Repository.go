@@ -123,6 +123,18 @@ func executeQueryProcessors(db *gorm.DB, out interface{}, queryProcessors ...Que
 	return db, err
 }
 
+func (repository *GormRepository) Delete(uow *UnitOfWork, out interface{}, queryProcessors ...QueryProcessor) error {
+	db := uow.DB
+	var err error
+	if len(queryProcessors) > 0 {
+		db, err = executeQueryProcessors(db, out, queryProcessors...)
+		if err != nil {
+			return err
+		}
+	}
+	return db.Delete(out).Error
+}
+
 func Filter(condition string, args ...interface{}) QueryProcessor {
 	return func(db *gorm.DB, out interface{}) (*gorm.DB, error) {
 		db = db.Where(condition, args...)

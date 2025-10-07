@@ -36,7 +36,6 @@ func (s *ProductService) CreateProduct(newProduct *products.Products) error {
 	uow := repository.NewUnitOfWork(s.db, false)
 	defer uow.RollBack()
 
-	newProduct.IsActive = true
 	now := time.Now()
 	newProduct.CreatedAt = now
 	newProduct.UpdatedAt = now
@@ -70,6 +69,8 @@ func (s *ProductService) UpdateProduct(productToUpdate *products.Products) error
 
 	productToUpdate.CreatedAt = existing.CreatedAt
 	productToUpdate.UpdatedAt = time.Now()
+
+	productToUpdate.IsActive = productToUpdate.IsActive
 
 	if err := s.repository.Update(uow, productToUpdate); err != nil {
 		return err
@@ -123,8 +124,10 @@ func (s *ProductService) GetProductByID(id string) (*products.DTO, error) {
 	}
 
 	var images [][]byte
+	var imageIDs []uuid.UUID
 	for _, img := range p.Images {
 		images = append(images, img.Image)
+		imageIDs = append(imageIDs, img.ID)
 	}
 
 	dto := &products.DTO{
@@ -133,6 +136,7 @@ func (s *ProductService) GetProductByID(id string) (*products.DTO, error) {
 		Description: p.Description,
 		Price:       p.Price,
 		Images:      images,
+		ImageIDs:    imageIDs,
 		CreatedAt:   p.CreatedAt,
 		UpdatedAt:   p.UpdatedAt,
 	}
@@ -141,13 +145,40 @@ func (s *ProductService) GetProductByID(id string) (*products.DTO, error) {
 	return dto, nil
 }
 
+func (s *ProductService) DeleteProductImage(productID string, imageID uuid.UUID) error {
+	if imageID == uuid.Nil {
+		return errors.NewValidationError("Invalid image ID")
+	}
+
+	uow := repository.NewUnitOfWork(s.db, false)
+	defer uow.RollBack()
+
+	var img products.ProductImage
+	query := repository.Filter("id = ? AND product_id = ?", imageID, productID)
+	if err := s.repository.GetRecord(uow, &img, query); err != nil {
+		return errors.NewValidationError("Product image not found")
+	}
+
+	updateMap := map[string]interface{}{
+		"DeletedAt": time.Now(),
+	}
+	if err := s.repository.UpdateWithMap(uow, &img, updateMap, repository.Filter("id = ?", imageID)); err != nil {
+		return errors.NewValidationError("Failed to delete product image: " + err.Error())
+	}
+
+	uow.Commit()
+	return nil
+}
+
 func (s *ProductService) GetAllProducts(allProducts *[]products.DTO, limit, offset int, totalCount *int, requestForm url.Values) error {
 	uow := repository.NewUnitOfWork(s.db, true)
 	defer uow.RollBack()
 
 	var productsList []products.Products
+
 	queryProcessors := []repository.QueryProcessor{
 		repository.NotDeleted(),
+		repository.Filter("is_active = ?", true),
 		repository.Paginate(limit, offset, totalCount),
 		repository.Preload("Images"),
 	}
@@ -162,8 +193,10 @@ func (s *ProductService) GetAllProducts(allProducts *[]products.DTO, limit, offs
 
 	for _, p := range productsList {
 		var images [][]byte
+		var imageIDs []uuid.UUID
 		for _, img := range p.Images {
 			images = append(images, img.Image)
+			imageIDs = append(imageIDs, img.ID)
 		}
 
 		*allProducts = append(*allProducts, products.DTO{
@@ -172,6 +205,7 @@ func (s *ProductService) GetAllProducts(allProducts *[]products.DTO, limit, offs
 			Description: p.Description,
 			Price:       p.Price,
 			Images:      images,
+			ImageIDs:    imageIDs,
 			CreatedAt:   p.CreatedAt,
 			UpdatedAt:   p.UpdatedAt,
 		})

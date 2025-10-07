@@ -4,6 +4,7 @@ import (
 	"ecommerce/errors"
 	"ecommerce/models/cart"
 	"ecommerce/models/order"
+	"ecommerce/models/products"
 	"ecommerce/repository"
 	"time"
 
@@ -26,13 +27,9 @@ func NewOrderService(db *gorm.DB, repo repository.EcommerceRepository, associati
 		associations: associations,
 	}
 }
-
-func (s *OrderService) CreateOrder(newOrder *order.Order) error {
+func (s *OrderService) CreateOrder(newOrder *order.Order, totalAmount float64) error {
 	uow := repository.NewUnitOfWork(s.db, false)
 	defer uow.RollBack()
-	if newOrder.Status == "" {
-		newOrder.Status = "confirmed"
-	}
 
 	var c cart.Cart
 	if err := s.repository.GetRecord(
@@ -40,19 +37,37 @@ func (s *OrderService) CreateOrder(newOrder *order.Order) error {
 		&c,
 		repository.Filter("id = ?", newOrder.CartID),
 		repository.NotDeleted(),
+		repository.Preload("Products.Product"),
 	); err != nil {
-		return errors.NewValidationError("Cart not found for this order")
+		return errors.NewValidationError("Cart not found")
 	}
 
-	newOrder.TotalAmount = c.TotalAmount
+	newOrder.UserID = c.UserID
+	newOrder.TotalAmount = totalAmount
+
+	orderProducts := make([]products.Products, 0, len(c.Products))
+	for _, cp := range c.Products {
+		orderProducts = append(orderProducts, cp.Product)
+	}
+	newOrder.Products = orderProducts
 
 	if err := s.repository.Add(uow, newOrder); err != nil {
 		return err
 	}
 
+	for _, item := range c.Products {
+		_ = s.repository.UpdateWithMap(
+			uow,
+			&cart.CartProduct{},
+			map[string]interface{}{"deleted_at": time.Now()},
+			repository.Filter("cart_id = ? AND product_id = ?", c.ID, item.ProductID),
+		)
+	}
+
 	uow.Commit()
 	return nil
 }
+
 func (s *OrderService) DeleteOrder(orderToDelete *order.Order) error {
 	existing, err := s.doesOrderExist(orderToDelete.ID)
 	if err != nil {

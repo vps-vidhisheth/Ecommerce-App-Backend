@@ -9,10 +9,10 @@ import (
 
 type Payment struct {
 	baseStruct.Base
-	UserID  uuid.UUID `gorm:"type:char(36);not null" json:"user_id"`
-	CartID  uuid.UUID `gorm:"type:char(36);not null" json:"cart_id"`
+	UserID  uuid.UUID `gorm:"type:char(36);not null" json:"userID"`
+	CartID  uuid.UUID `gorm:"type:char(36);not null" json:"cartID"`
 	Amount  float64   `gorm:"type:decimal(10,2);not null" json:"amount"`
-	OrderID uuid.UUID `gorm:"type:char(36);not null" json:"order_id"`
+	OrderID uuid.UUID `gorm:"type:char(36);not null" json:"orderID"`
 }
 
 func (p *Payment) Validate(isUpdate bool) error {

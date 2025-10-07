@@ -6,10 +6,11 @@ import (
 	"ecommerce/components/order/service"
 	paymentController "ecommerce/components/payments/controller"
 	paymentService "ecommerce/components/payments/service"
+	userService "ecommerce/components/user/service"
 	"ecommerce/repository"
 )
 
-func registerpaymentsRoutes(appObj *app.App, repository repository.EcommerceRepository) {
+func registerPaymentsRoutes(appObj *app.App, repository repository.EcommerceRepository, userSvc *userService.UserService) {
 
 	paymentsService := paymentService.NewPaymentService(appObj.DB, repository)
 
@@ -18,5 +19,6 @@ func registerpaymentsRoutes(appObj *app.App, repository repository.EcommerceRepo
 
 	paymentsController := paymentController.NewPaymentController(paymentsService, orderSvc, cartsSvc, appObj.Log)
 
-	appObj.ResigterControllerRoutes([]app.Controller{paymentsController})
+	// Pass userSvc explicitly to RegisterRoutes
+	paymentsController.RegisterRoutes(appObj.Router, userSvc)
 }

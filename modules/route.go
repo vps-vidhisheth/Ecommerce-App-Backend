@@ -2,19 +2,18 @@ package modules
 
 import (
 	"ecommerce/app"
+	userService "ecommerce/components/user/service"
 	"ecommerce/repository"
 )
 
 func RegisterModuleRoutes(app *app.App, repo repository.EcommerceRepository) {
-	log := app.Log
-	log.Print("======== RegisterModuleRoutes.go ========")
+	// Create UserService internally
+	userSvc := userService.NewUserService(app.DB, repo, []string{})
 
 	registerUserRoutes(app, repo)
 	registerLoginRoutes(app, repo)
-	registerProductRoutes(app, repo)
-	registerCartRoutes(app, repo)
-	registerOrderRoutes(app, repo)
-	registerpaymentsRoutes(app, repo)
-
-	log.Print("[ All module routes registered successfully ]")
+	registerProductRoutes(app, repo, userSvc)
+	registerCartRoutes(app, repo, userSvc)
+	registerOrderRoutes(app, repo, userSvc)
+	registerPaymentsRoutes(app, repo, userSvc)
 }

@@ -7,8 +7,8 @@ import (
 )
 
 type LoginAttempt struct {
-	UserID      uuid.UUID  `json:"user_id"`
-	FailedCount int        `json:"failed_count"`
-	LastAttempt time.Time  `json:"last_attempt"`
-	LockedUntil *time.Time `json:"locked_until,omitempty"`
+	UserID      uuid.UUID  `json:"userID"`
+	FailedCount int        `json:"failedCount"`
+	LastAttempt time.Time  `json:"lastAttempt"`
+	LockedUntil *time.Time `json:"lockedUntil,omitempty"`
 }

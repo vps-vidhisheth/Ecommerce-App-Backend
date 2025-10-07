@@ -3,6 +3,7 @@ package controller
 import (
 	"ecommerce/components/log"
 	"ecommerce/components/order/service"
+	Userservice "ecommerce/components/user/service"
 	"ecommerce/errors"
 	"ecommerce/models/baseStruct"
 	"ecommerce/models/order"
@@ -15,49 +16,43 @@ import (
 )
 
 type OrderController struct {
-	log     log.Log
-	service *service.OrderService
+	log         log.Log
+	service     *service.OrderService
+	userService *Userservice.UserService
 }
 
-func NewOrderController(orderService *service.OrderService, logger log.Log) *OrderController {
+func NewOrderController(orderService *service.OrderService, logger log.Log, userService *Userservice.UserService) *OrderController {
 	return &OrderController{
-		log:     logger,
-		service: orderService,
+		log:         logger,
+		service:     orderService,
+		userService: userService,
 	}
 }
 
 func (c *OrderController) RegisterRoutes(router *mux.Router) {
 	orderRouter := router.PathPrefix("/orders").Subrouter()
-	orderRouter.Use(authmiddleware.AuthMiddleware)
+
+	authMiddleware := func(next http.Handler) http.Handler {
+		return authmiddleware.AuthMiddleware(c.userService, next)
+	}
+	orderRouter.Use(authMiddleware)
+
 	orderRouter.HandleFunc("", c.CreateOrder).Methods(http.MethodPost)
 	orderRouter.HandleFunc("/user/{userID}", c.GetOrdersByUserID).Methods(http.MethodGet)
 	orderRouter.HandleFunc("/{id}", c.DeleteOrder).Methods(http.MethodDelete)
 
 	adminRouter := router.PathPrefix("/orders").Subrouter()
-	adminRouter.Use(authmiddleware.AuthMiddleware)
+	adminRouter.Use(authMiddleware)
 	adminRouter.Use(authmiddleware.AdminMiddleware)
+
 	adminRouter.HandleFunc("", c.GetAllOrders).Methods(http.MethodGet)
 
 	c.log.Print("======== Order Routes Registered =========")
 }
 
 func (c *OrderController) CreateOrder(w http.ResponseWriter, r *http.Request) {
-	var newOrder order.Order
-	if err := web.UnmarshalJSON(r, &newOrder); err != nil {
-		web.RespondError(w, err)
-		return
-	}
-	if err := newOrder.Validate(false); err != nil {
-		web.RespondError(w, err)
-		return
-	}
-
-	if err := c.service.CreateOrder(&newOrder); err != nil {
-		web.RespondError(w, err)
-		return
-	}
-
-	web.RespondJSON(w, http.StatusCreated, newOrder)
+	web.RespondError(w, errors.NewHTTPError(
+		"Orders must be created after payment", http.StatusForbidden))
 }
 
 func (c *OrderController) DeleteOrder(w http.ResponseWriter, r *http.Request) {

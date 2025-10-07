@@ -15,13 +15,13 @@ type Products struct {
 	Name        string         `gorm:"type:varchar(255);not null" json:"name"`
 	Description string         `gorm:"type:text" json:"description"`
 	Price       float64        `gorm:"type:decimal(10,2);not null" json:"price"`
-	IsActive    bool           `gorm:"default:true" json:"is_active"`
+	IsActive    bool           `gorm:"default:true" json:"isActive"`
 	Images      []ProductImage `gorm:"foreignKey:ProductID" json:"images"`
 }
 
 type ProductImage struct {
 	baseStruct.Base
-	ProductID uuid.UUID `gorm:"type:char(36);index" json:"product_id"`
+	ProductID uuid.UUID `gorm:"type:char(36);index" json:"productID"`
 	Image     []byte    `gorm:"type:longblob" json:"image"`
 }
 
@@ -45,14 +45,36 @@ func (p *Products) Validate(isUpdate bool) error {
 	return nil
 }
 
+func ToDTO(p *Products) DTO {
+	images := [][]byte{}
+	imageIDs := []uuid.UUID{}
+
+	for _, img := range p.Images {
+		images = append(images, img.Image)
+		imageIDs = append(imageIDs, img.ID)
+	}
+
+	return DTO{
+		ID:          p.ID,
+		Name:        p.Name,
+		Description: p.Description,
+		Price:       p.Price,
+		Images:      images,
+		ImageIDs:    imageIDs,
+		CreatedAt:   p.CreatedAt,
+		UpdatedAt:   p.UpdatedAt,
+	}
+}
+
 type DTO struct {
-	ID          uuid.UUID `json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Price       float64   `json:"price"`
-	Images      [][]byte  `json:"images"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          uuid.UUID   `json:"id"`
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+	Price       float64     `json:"price"`
+	Images      [][]byte    `json:"images"`
+	ImageIDs    []uuid.UUID `json:"imageIds"`
+	CreatedAt   time.Time   `json:"created_at"`
+	UpdatedAt   time.Time   `json:"updated_at"`
 }
 
 func (DTO) TableName() string {
