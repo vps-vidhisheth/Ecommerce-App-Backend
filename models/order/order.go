@@ -37,8 +37,8 @@ type DTO struct {
 	CartID      uuid.UUID `json:"cartID"`
 	Status      string    `json:"status"`
 	TotalAmount float64   `json:"totalAmount"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	CreatedAt   time.Time `json:"createdAT"`
+	UpdatedAt   time.Time `json:"updatedAT"`
 }
 
 func (DTO) TableName() string {

@@ -132,7 +132,6 @@ func (s *UserService) UpdateUserRole(userID uuid.UUID, newRole string) error {
 	uow.Commit()
 	return nil
 }
-
 func (s *UserService) UpdateUserProfile(userToUpdate *user.User) error {
 	existing, err := s.doesUserExist(userToUpdate.ID)
 	if err != nil {
@@ -141,6 +140,17 @@ func (s *UserService) UpdateUserProfile(userToUpdate *user.User) error {
 
 	uow := repository.NewUnitOfWork(s.db, false)
 	defer uow.RollBack()
+
+	// ✅ Only check for duplicate if the email was actually changed
+	if userToUpdate.Email != existing.Email {
+		taken, err := s.isEmailTaken(userToUpdate.Email)
+		if err != nil {
+			return err
+		}
+		if taken {
+			return errors.NewValidationError("Email already exists")
+		}
+	}
 
 	userToUpdate.CreatedAt = existing.CreatedAt
 	userToUpdate.UpdatedAt = time.Now()

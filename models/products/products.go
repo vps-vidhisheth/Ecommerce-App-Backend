@@ -65,8 +65,8 @@ type DTO struct {
 	Price       float64     `json:"price"`
 	Images      [][]byte    `json:"images"`
 	ImageIDs    []uuid.UUID `json:"imageIds"`
-	CreatedAt   time.Time   `json:"created_at"`
-	UpdatedAt   time.Time   `json:"updated_at"`
+	CreatedAt   time.Time   `json:"createdAT"`
+	UpdatedAt   time.Time   `json:"updatedAT"`
 }
 
 func (DTO) TableName() string {

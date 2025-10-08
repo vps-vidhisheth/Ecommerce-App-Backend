@@ -14,9 +14,9 @@ type CartProduct struct {
 	ProductID uuid.UUID         `gorm:"type:char(36);primaryKey;not null" json:"productID"`
 	Product   products.Products `gorm:"foreignKey:ProductID;references:ID" json:"products"`
 	Quantity  int               `gorm:"type:int;default:1" json:"quantity"`
-	CreatedAt time.Time         `json:"created_at"`
-	UpdatedAt time.Time         `json:"updated_at"`
-	DeletedAt *time.Time        `gorm:"index" json:"deleted_at,omitempty"`
+	CreatedAt time.Time         `json:"createdAT"`
+	UpdatedAt time.Time         `json:"updatedAT"`
+	DeletedAt *time.Time        `gorm:"index" json:"deletedAT,omitempty"`
 }
 
 type Cart struct {
@@ -38,8 +38,8 @@ type DTO struct {
 	UserID      uuid.UUID     `json:"userID"`
 	Products    []CartProduct `json:"products"`
 	TotalAmount float64       `json:"totalAmount"`
-	CreatedAt   time.Time     `json:"created_at"`
-	UpdatedAt   time.Time     `json:"updated_at"`
+	CreatedAt   time.Time     `json:"createdAT"`
+	UpdatedAt   time.Time     `json:"updatedAT"`
 }
 
 func (DTO) TableName() string {

@@ -13,7 +13,7 @@ import (
 type User struct {
 	baseStruct.Base
 	Name                string     `gorm:"type:varchar(100);not null" json:"name"`
-	Email               string     `gorm:"type:varchar(100);unique;not null" json:"email"`
+	Email               string     `gorm:"type:varchar(100);not null" json:"email"`
 	Password            string     `gorm:"type:varchar(255);not null" json:"password"`
 	Role                string     `gorm:"type:varchar(50);not null" json:"role"`
 	ProfilePic          []byte     `gorm:"type:LONGBLOB" json:"profilePic,omitempty"`
@@ -55,8 +55,8 @@ type DTO struct {
 	Role       string    `json:"role"`
 	ProfilePic []byte    `json:"profilePic"`
 	IsActive   bool      `json:"isActive"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	CreatedAt  time.Time `json:"createdAT"`
+	UpdatedAt  time.Time `json:"updatedAT"`
 }
 
 func (DTO) TableName() string {
