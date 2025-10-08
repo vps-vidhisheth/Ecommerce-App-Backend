@@ -3,6 +3,7 @@ package controller
 import (
 	"ecommerce/components/log"
 	"ecommerce/components/user/service"
+	constants "ecommerce/constant"
 	"ecommerce/errors"
 	"ecommerce/models/baseStruct"
 	"ecommerce/models/user"
@@ -68,7 +69,7 @@ func (c *UserController) RegisterUser(w http.ResponseWriter, r *http.Request) {
 		Name:     r.FormValue("name"),
 		Email:    r.FormValue("email"),
 		Password: r.FormValue("password"),
-		Role:     "customer",
+		Role:     constants.RoleCustomer,
 	}
 
 	if err := newUser.Validate(false); err != nil {
@@ -101,7 +102,7 @@ func (c *UserController) UpdateUserRole(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if !strings.EqualFold(role, "ADMIN") {
+	if !strings.EqualFold(role, constants.RoleAdmin) {
 		web.RespondError(w, errors.NewValidationError("Unauthorized: only admin can update user roles"))
 		return
 	}
@@ -122,7 +123,7 @@ func (c *UserController) UpdateUserRole(w http.ResponseWriter, r *http.Request) 
 	}
 
 	roleLower := strings.ToLower(req.Role)
-	if roleLower != "admin" && roleLower != "customer" {
+	if roleLower != constants.RoleAdmin && roleLower != constants.RoleCustomer {
 		web.RespondError(w, errors.NewValidationError("Invalid role: only 'admin' or 'customer' allowed"))
 		return
 	}

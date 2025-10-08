@@ -40,10 +40,6 @@ func (s *ProductService) CreateProduct(newProduct *products.Products) error {
 	newProduct.CreatedAt = now
 	newProduct.UpdatedAt = now
 
-	if newProduct.ID == uuid.Nil {
-		newProduct.ID = uuid.New()
-	}
-
 	for i := range newProduct.Images {
 		newProduct.Images[i].ProductID = newProduct.ID
 		newProduct.Images[i].CreatedAt = now

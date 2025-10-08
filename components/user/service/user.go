@@ -2,15 +2,15 @@ package service
 
 import (
 	"crypto/rand"
-	"encoding/hex"
-	"fmt"
-	"net/url"
-	"time"
-
+	constants "ecommerce/constant"
 	"ecommerce/errors"
 	"ecommerce/models/user"
 	"ecommerce/repository"
 	"ecommerce/util"
+	"encoding/hex"
+	"fmt"
+	"net/url"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jinzhu/gorm"
@@ -59,6 +59,14 @@ func (s *UserService) CreateUser(newUser *user.User) error {
 	uow := repository.NewUnitOfWork(s.db, false)
 	defer uow.RollBack()
 
+	taken, err := s.isEmailTaken(newUser.Email)
+	if err != nil {
+		return err
+	}
+	if taken {
+		return errors.NewValidationError("Email already exists")
+	}
+
 	hashed, err := s.hashPassword(newUser.Password)
 	if err != nil {
 		return err
@@ -74,6 +82,27 @@ func (s *UserService) CreateUser(newUser *user.User) error {
 	return nil
 }
 
+func (s *UserService) isEmailTaken(email string) (bool, error) {
+	uow := repository.NewUnitOfWork(s.db, true)
+	defer uow.RollBack()
+
+	var existing user.User
+	err := s.repository.GetRecord(
+		uow,
+		&existing,
+		repository.Filter("email = ?", email),
+		repository.NotDeleted(),
+	)
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return false, nil
+		}
+		return false, err
+	}
+
+	return true, nil
+}
+
 func (s *UserService) UpdateUserRole(userID uuid.UUID, newRole string) error {
 	uow := repository.NewUnitOfWork(s.db, false)
 	defer uow.RollBack()
@@ -83,7 +112,7 @@ func (s *UserService) UpdateUserRole(userID uuid.UUID, newRole string) error {
 		return errors.NewValidationError("User not found")
 	}
 
-	if newRole != "admin" && newRole != "customer" {
+	if newRole != constants.RoleAdmin && newRole != constants.RoleCustomer {
 		return errors.NewValidationError("Invalid role: must be 'admin' or 'customer'")
 	}
 

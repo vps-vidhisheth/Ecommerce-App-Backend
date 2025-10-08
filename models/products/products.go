@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jinzhu/gorm"
 )
 
 type Products struct {
@@ -23,13 +22,6 @@ type ProductImage struct {
 	baseStruct.Base
 	ProductID uuid.UUID `gorm:"type:char(36);index" json:"productID"`
 	Image     []byte    `gorm:"type:longblob" json:"image"`
-}
-
-func (p *ProductImage) BeforeCreate(scope *gorm.Scope) error {
-	if p.ID == uuid.Nil {
-		return scope.SetColumn("ID", uuid.New())
-	}
-	return nil
 }
 
 func (p *Products) Validate(isUpdate bool) error {

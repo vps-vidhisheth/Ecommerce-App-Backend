@@ -154,7 +154,6 @@ func (c *ProductController) UpdateProduct(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Add new uploaded images
 	files := r.MultipartForm.File["images"]
 	for _, fileHeader := range files {
 		file, err := fileHeader.Open()

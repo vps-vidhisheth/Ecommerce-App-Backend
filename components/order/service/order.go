@@ -1,6 +1,7 @@
 package service
 
 import (
+	constants "ecommerce/constant"
 	"ecommerce/errors"
 	"ecommerce/models/cart"
 	"ecommerce/models/order"
@@ -27,6 +28,7 @@ func NewOrderService(db *gorm.DB, repo repository.EcommerceRepository, associati
 		associations: associations,
 	}
 }
+
 func (s *OrderService) CreateOrder(newOrder *order.Order, totalAmount float64) error {
 	uow := repository.NewUnitOfWork(s.db, false)
 	defer uow.RollBack()
@@ -82,7 +84,7 @@ func (s *OrderService) DeleteOrder(orderToDelete *order.Order) error {
 	defer uow.RollBack()
 
 	updateMap := map[string]interface{}{
-		"status":     "canceled",
+		"status":     constants.StatusCanceled,
 		"updated_at": time.Now(),
 	}
 
