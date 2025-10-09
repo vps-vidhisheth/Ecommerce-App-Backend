@@ -141,7 +141,6 @@ func (s *UserService) UpdateUserProfile(userToUpdate *user.User) error {
 	uow := repository.NewUnitOfWork(s.db, false)
 	defer uow.RollBack()
 
-	// ✅ Only check for duplicate if the email was actually changed
 	if userToUpdate.Email != existing.Email {
 		taken, err := s.isEmailTaken(userToUpdate.Email)
 		if err != nil {
