@@ -6,9 +6,9 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-)
 
-const RecaptchaSecret = "6LdXU-ArAAAAAB0rxVjGDqfW5znWpTkwobgnGJLX"
+	"github.com/spf13/viper"
+)
 
 type RecaptchaResponse struct {
 	Success    bool     `json:"success"`
@@ -16,8 +16,13 @@ type RecaptchaResponse struct {
 }
 
 func VerifyRecaptcha(token string) error {
+	recaptchaSecret := viper.GetString("RECAPTCHA_SECRET")
+	if recaptchaSecret == "" {
+		return fmt.Errorf("RECAPTCHA_SECRET not set in environment variables")
+	}
+
 	form := url.Values{}
-	form.Set("secret", RecaptchaSecret)
+	form.Set("secret", recaptchaSecret)
 	form.Set("response", token)
 
 	resp, err := http.PostForm("https://www.google.com/recaptcha/api/siteverify", form)
